@@ -1,0 +1,6 @@
+[tool.mypy]
+cache_dir = "/dev/null"
+strict = true
+exclude = [
+    "tests/",
+]
