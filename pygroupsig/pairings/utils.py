@@ -28,6 +28,8 @@ lib = None
 
 def load_library():
     global lib
+    if LIB_PATH is None:
+        raise RuntimeError("Environment variable MCL_LIB_PATH missing.")
     ctypes.CDLL(f"{LIB_PATH}/{MCL_LIB}")
     lib = ctypes.CDLL(f"{LIB_PATH}/{MCL384_LIB}")
     ret = lib.mclBn_init(MCL_BLS12_381, MCLBN_COMPILED_TIME_VAR)

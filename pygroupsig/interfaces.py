@@ -26,20 +26,35 @@ class SchemeInterface(metaclass=ABCMeta):
         new member to any necessary component (e.g. GMLs).
         """
 
-    # @abstractmethod
-    # def sign(self, message: str):
-    #     """
-    #     Type of functions for signing messages.
-    #     """
+    @abstractmethod
+    def sign(self, message):
+        """
+        Type of functions for signing messages.
+        """
 
-    # @abstractmethod
-    # def verify(self, message: str, sig: dict):
-    #     """
-    #     Type of functions for verifying group signatures.
-    #     """
+    @abstractmethod
+    def verify(self, message, signature):
+        """
+        Type of functions for verifying group signatures.
+        """
 
 
 class KeyInterface(metaclass=ABCMeta):
+    # @abstractmethod
+    # def to_b64(self):
+    #     ...
+
+    # @abstractmethod
+    # def from_b64(self):
+    #     ,,,
+
+    # @abstractmethod
+    # def to_string(self):
+    #     ...
+    ...
+
+
+class SignatureInterface(metaclass=ABCMeta):
     # @abstractmethod
     # def to_b64(self):
     #     ...

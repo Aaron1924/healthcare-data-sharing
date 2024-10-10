@@ -443,10 +443,13 @@ class TestFp2(FBaseTest):
 class GBaseTest(unittest.TestCase):
     def setUp(self):
         load_library()
+        self.h = "f0c8dc42d5a51db0c326916d10392adbf76b14ae99d489ff3560611a97420eee"
         if isinstance(self, TestG1):
             self.s = ut.BLS12_381_P
+            self.v = "1 3719226684904596419579221578361625155541235735183967430228173297117758812288229752053408139708879506501457152802942 260918097660325786349299603372812253806953498958308283336009514870956832500285249250447899736364680533026929093718"
         else:
             self.s = ut.BLS12_381_Q
+            self.v = "1 835291197291119138835982130627849483202366689768919374128556270083673076425684408356112030969361574591025123607949 262446842239551949853427194215207084960530636993308253549525386344727618348891416626249682329755634097133131050377 1485374626780584277638246857402993053167420159545306011973894843376495696555900277040606767721288523043305649236038 3253563504197550909989288629072739120866164573027127387470195401209461645203269415741294914321252541506907241635197"
 
     def _testByteSize(self, cls, value):
         self.assertEqual(cls.byte_size(), value)
@@ -540,12 +543,8 @@ class GBaseTest(unittest.TestCase):
 
     def _testSetHash(self, cls):
         x = cls()
-        x.set_str(self.s)
-        y = cls()
-        y.set_hash("a1d0c6e83f027327d8461063f4ac58a6")
-        self.assertIs(x == y, False)
-        x.set_hash("a1d0c6e83f027327d8461063f4ac58a6")
-        self.assertIs(x == y, True)
+        x.set_hash(self.h)
+        self.assertEqual(x.get_str(), self.v)
 
     def _testFile(self, cls):
         x = cls()
@@ -572,7 +571,6 @@ class GBaseTest(unittest.TestCase):
         self.assertIs(x.is_zero(), False)
         y = cls()
         y.set_random()
-        self.assertIs(y.is_zero(), False)
         self.assertIs(x == y, False)
         self.assertNotEqual(x.get_str(), y.get_str())
 

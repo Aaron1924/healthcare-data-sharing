@@ -10,7 +10,7 @@ class Base(ctypes.Structure):
     SIG = "mclBn{}_{}"
 
     def __str__(self):
-        return f"{self.__class__} {self.get_str().decode()}"
+        return f"{self.__class__} {self.get_str()}"
 
     def __repr__(self):
         return str(self)
@@ -62,7 +62,7 @@ class Base(ctypes.Structure):
         sz = func(buf, self.BUF_SZ, self)
         return buf.raw[:sz]
 
-    def set_from_bytes(self, buf):
+    def set_bytes(self, buf):
         func = self._func(
             "deserialize",
             [
@@ -76,34 +76,25 @@ class Base(ctypes.Structure):
 
     @classmethod
     def from_bytes(cls, buf):
-        func = getattr(
-            ut.lib, cls.SIG.format(cls.__name__, "deserialize")
-        )
-        func.argtypes = [
-            ctypes.POINTER(cls),
-            ctypes.c_char_p,
-            ctypes.c_size_t,
-        ]
-        func.restype = ctypes.c_size_t
         ret = cls()
-        func(ret, buf, len(buf))
+        ret.set_bytes(buf)
         return ret
 
     def to_hex(self):
         return "".join([f"{b:02x}" for b in self.to_bytes()])
 
     def to_b64(self):
-        return b64encode(self.to_bytes())
+        return b64encode(self.to_bytes()).decode()
 
-    def set_from_b64(self, s):
-        return self.set_from_bytes(b64decode(s))
+    def set_b64(self, s):
+        return self.set_bytes(b64decode(s.encode()))
 
     @classmethod
     def from_b64(cls, s):
-        return cls.from_bytes(b64decode(s))
+        return cls.from_bytes(b64decode(s.encode()))
 
-    def set_from_object(self, y):
-        return self.set_from_bytes(y.to_bytes())
+    def set_object(self, y):
+        return self.set_bytes(y.to_bytes())
 
     @classmethod
     def from_object(cls, y):
@@ -119,9 +110,9 @@ class Base(ctypes.Structure):
         with open(file, "wb") as f:
             f.write(self.to_b64())
 
-    def set_from_file(self, file):
+    def set_file(self, file):
         with open(file, "rb") as f:
-            return self.set_from_b64(f.read())
+            return self.set_b64(f.read())
 
     @classmethod
     def from_file(cls, file):
@@ -186,6 +177,12 @@ class StrMixin:
                 f"Failed to call {self.__class__.__name__}.setStr()"
             )
 
+    @classmethod
+    def from_str(cls, s, mode=10):
+        ret = cls()
+        ret.set_str(s, mode)
+        return ret
+
     def get_str(self, mode=10):
         buf = ctypes.create_string_buffer(self.BUF_SZ)
         func = self._func(
@@ -208,7 +205,7 @@ class StrMixin:
 class HashEndianPrngCmpMixin:
     def set_hash(self, s):
         if isinstance(s, str):
-            s = s.encode()
+            s = bytes(bytearray.fromhex(s))
         elif not isinstance(s, bytes):
             raise TypeError(f"Invalid {s} type. Expected str/bytes")
         func = self._func(
@@ -224,6 +221,12 @@ class HashEndianPrngCmpMixin:
             raise RuntimeError(
                 f"Failed to call {self.__class__.__name__}.setHashOf()"
             )
+
+    @classmethod
+    def from_hash(cls, s):
+        ret = cls()
+        ret.set_hash(s)
+        return ret
 
     # def set_little_endian(self, s):
     #     if isinstance(s, str):
@@ -256,6 +259,12 @@ class HashEndianPrngCmpMixin:
             raise RuntimeError(
                 f"Failed to {self.__class__.__name__}.setByCSPNRG()"
             )
+
+    @classmethod
+    def from_random(cls):
+        ret = cls()
+        ret.set_random()
+        return ret
 
     def cmp(self, y):
         return self._one_arg("cmp", y)
@@ -333,7 +342,7 @@ class MulVecMixin:
 class HashAndMapMixin:
     def set_hash(self, s):
         if isinstance(s, str):
-            s = s.encode()
+            s = bytes(bytearray.fromhex(s))
         elif not isinstance(s, bytes):
             raise TypeError(f"Invalid {s} type. Expected str/bytes")
         func = self._func(
@@ -350,6 +359,12 @@ class HashAndMapMixin:
                 f"Failed to call {self.__class__.__name__}.hashAndMapTo()"
             )
 
+    @classmethod
+    def from_hash(cls, s):
+        ret = cls()
+        ret.set_hash(s)
+        return ret
+
 
 class IntMixin:
     def set_int(self, i):
@@ -359,6 +374,12 @@ class IntMixin:
             "setInt", [ctypes.POINTER(self.__class__), ctypes.c_int64]
         )
         func(self, i)
+
+    @classmethod
+    def from_int(cls, i):
+        ret = cls()
+        ret.set_int(i)
+        return ret
 
 
 class GenPrngMixin:
@@ -370,7 +391,13 @@ class GenPrngMixin:
             gen.set_str(ut.BLS12_381_Q)
         r = Fr()
         r.set_random()
-        self.set_from_object(gen * r)
+        self.set_object(gen * r)
+
+    @classmethod
+    def from_random(cls):
+        ret = cls()
+        ret.set_random()
+        return ret
 
 
 class Fp(
