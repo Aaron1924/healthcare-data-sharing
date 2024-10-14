@@ -313,14 +313,6 @@ class MulFrMixin:
         return self.__mul__(y)
 
 
-class PowMixin:
-    def __pow__(self, y):
-        return self._one_arg("pow", y, ret=True)
-
-    def pow(self, y):
-        return self.__pow__(y)
-
-
 class MulVecMixin:
     def muln(self, x, y):
         if len(x) != len(y):
@@ -329,14 +321,32 @@ class MulVecMixin:
             )
         func = self._func(
             "mulVec",
-            [
-                ctypes.POINTER(self.__class__),
-                ctypes.POINTER(self.__class__),
-                ctypes.POINTER(Fr),
-                ctypes.c_size_t,
-            ]
+            [ctypes.POINTER(self.__class__)] * 2
+            + [ctypes.POINTER(Fr), ctypes.c_size_t]
         )
         func(self, x, y, min(len(x), len(y)))
+
+
+class PowMixin:
+    def __pow__(self, y):
+        return self._one_arg("pow", y, ret=True)
+
+    def pow(self, y):
+        return self.__pow__(y)
+
+
+class PowFrMixin:
+    def __pow__(self, y):
+        func = self._func(
+            "pow",
+            [ctypes.POINTER(self.__class__)] * 2 + [ctypes.POINTER(Fr)]
+        )
+        ret = self.__class__()
+        func(ret, self, y)
+        return ret
+
+    def pow(self, y):
+        return self.__mul__(y)
 
 
 class HashAndMapMixin:
@@ -441,7 +451,7 @@ class G2(StrMixin, MulFrMixin, MulVecMixin,
     _fields_ = [("x", Fp2), ("y", Fp2), ("z", Fp2)]
 
 
-class GT(StrMixin, OneInvDivMixin, PowMixin, MulVecMixin,
+class GT(StrMixin, OneInvDivMixin, MulVecMixin, PowFrMixin,
          IntMixin, Base):
     D = 12
     _fields_ = [("d", Fp * D)]
@@ -457,12 +467,8 @@ class GT(StrMixin, OneInvDivMixin, PowMixin, MulVecMixin,
             )
         func = self._func(
             "powVec",
-            [
-                ctypes.POINTER(self.__class__),
-                ctypes.POINTER(self.__class__),
-                ctypes.POINTER(Fr),
-                ctypes.c_size_t,
-            ]
+            [ctypes.POINTER(self.__class__)] * 2
+            + [ctypes.POINTER(Fr), ctypes.c_size_t]
         )
         func(self, x, y, min(len(x), len(y)))
 

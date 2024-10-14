@@ -240,7 +240,7 @@ class FBaseTest(unittest.TestCase):
             x.set_int(42)
         x_b = x.to_bytes()
         y = cls()
-        y.set_from_bytes(x_b)
+        y.set_bytes(x_b)
         y_p = cls.from_bytes(x_b)
         self.assertIs(x == y == y_p, True)
 
@@ -263,7 +263,7 @@ class FBaseTest(unittest.TestCase):
         f = Path("/tmp/.test_pairings.txt")
         x.to_file(f)
         y = cls()
-        y.set_from_file(f)
+        y.set_file(f)
         y_p = cls.from_file(f)
         self.assertIs(x == y == y_p, True)
 
@@ -276,7 +276,7 @@ class FBaseTest(unittest.TestCase):
             x.set_int(42)
         x_b64 = x.to_b64()
         y = cls()
-        y.set_from_b64(x_b64)
+        y.set_b64(x_b64)
         y_p = cls.from_b64(x_b64)
         self.assertIs(x == y == y_p, True)
 
@@ -537,7 +537,7 @@ class GBaseTest(unittest.TestCase):
         x.set_str(self.s)
         x_b = x.to_bytes()
         y = cls()
-        y.set_from_bytes(x_b)
+        y.set_bytes(x_b)
         y_p = cls.from_bytes(x_b)
         self.assertIs(x == y == y_p, True)
 
@@ -552,7 +552,7 @@ class GBaseTest(unittest.TestCase):
         f = Path("/tmp/.test_pairings.txt")
         x.to_file(f)
         y = cls()
-        y.set_from_file(f)
+        y.set_file(f)
         y_p = y.from_file(f)
         self.assertIs(x == y == y_p, True)
 
@@ -561,7 +561,7 @@ class GBaseTest(unittest.TestCase):
         x.set_str(self.s)
         x_b64 = x.to_b64()
         y = cls()
-        y.set_from_b64(x_b64)
+        y.set_b64(x_b64)
         y_p = y.from_b64(x_b64)
         self.assertIs(x == y == y_p, True)
 

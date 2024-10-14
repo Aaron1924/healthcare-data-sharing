@@ -5,88 +5,98 @@ from pygroupsig.klap20.scheme import (
     MemberKey as Klap20MemKey,
     Signature as Klap20Signature,
 )
-from pygroupsig.interfaces import (
-    KeyInterface,
-    SchemeInterface,
-    SignatureInterface,
+from pygroupsig.gl19.scheme import (
+    Gl19,
+    GroupKey as Gl19GrpKey,
+    ManagerKey as Gl19MgrKey,
+    MemberKey as Gl19MemKey,
+    Signature as Gl19Signature,
 )
+import json
+from base64 import b64decode
+import logging
 
 
-class Scheme(SchemeInterface):
+class Scheme:
     _SCHEMES = {
-        "klap20": Klap20
+        "klap20": Klap20,
+        "gl19": Gl19,
     }
 
-    def __init__(self, scheme):
-        self.scheme = self._get_scheme(scheme)
-
-    def _get_scheme(self, scheme):
+    def __new__(cls, scheme):
         _name = scheme.lower()
-        if _name in self._SCHEMES:
-            return self._SCHEMES[_name]()
+        if _name in cls._SCHEMES:
+            return cls._SCHEMES[_name]()
         raise ValueError(f"Unknown scheme: {scheme}")
 
-    def setup(self):
-        self.scheme.setup()
 
-    def join_mgr(self, phase, message=None):
-        return self.scheme.join_mgr(phase, message)
-
-    def join_mem(self, phase, message=None):
-        return self.scheme.join_mem(phase, message)
-
-    def sign(self, message):
-        return self.scheme.sign(message)
-
-    def verify(self, message, signature):
-        return self.scheme.verify(message, signature)
-
-
-class Key(KeyInterface):
+class Key:
     _KEYS = {
         "group": {
-            "klap20": Klap20GrpKey
+            "klap20": Klap20GrpKey,
+            "gl19": Gl19GrpKey,
         },
         "manager": {
-            "klap20": Klap20MgrKey
+            "klap20": Klap20MgrKey,
+            "gl19": Gl19MgrKey,
         },
         "member": {
-            "klap20": Klap20MemKey
+            "klap20": Klap20MemKey,
+            "gl19": Gl19MemKey,
         }
     }
 
-    def __init__(self, scheme, ktype):
-        self.key = self._get_key(scheme, ktype)
-
-    def _get_key(self, scheme, ktype):
+    def __new__(cls, scheme, ktype):
         _name = scheme.lower()
         _ktype = ktype.lower()
-        if _ktype in self._KEYS:
-            if _name in self._KEYS[_ktype]:
-                return self._KEYS[_ktype][_name]()
+        if _ktype in cls._KEYS:
+            if _name in cls._KEYS[_ktype]:
+                return cls._KEYS[_ktype][_name]()
             else:
                 raise ValueError(f"Unknown scheme: {scheme}")
         else:
             raise ValueError(f"Unknown key type: {ktype}")
 
+    @classmethod
+    def from_b64(cls, s):
+        if isinstance(s, str):
+            s = s.encode()
+        elif not isinstance(s, bytes):
+            msg = "Invalid key type. Expected str/bytes"
+            logging.error(msg)
+            return msg
+        data = json.loads(b64decode(s))
+        ret = cls(data["scheme"], data["type"])
+        ret.set_b64(data["key"])
+        return ret
 
-class Signature(SignatureInterface):
+
+class Signature:
     _SIGNATURES = {
-        "klap20": Klap20Signature
+        "klap20": Klap20Signature,
+        "gl19": Gl19Signature,
     }
 
-    def __init__(self, scheme):
-        self.signature = self._get_signature(scheme)
-
-    def _get_signature(self, scheme):
+    def __new__(cls, scheme):
         _name = scheme.lower()
-        if _name in self._SIGNATURES:
-            return self._SIGNATURES[_name]()
+        if _name in cls._SIGNATURES:
+            return cls._SIGNATURES[_name]()
         else:
             raise ValueError(f"Unknown scheme: {scheme}")
 
-    def to_b64(self):
-        self.signature.to_b64()
+    @classmethod
+    def from_b64(cls, s):
+        if isinstance(s, str):
+            s = s.encode()
+        elif not isinstance(s, bytes):
+            msg = "Invalid signature type. Expected str/bytes"
+            logging.error(msg)
+            return msg
+        data = json.loads(b64decode(s))
+        ret = cls(data["scheme"])
+        ret.set_b64(data["signature"])
+        return ret
+
 
 
 # class SPKDLog:
