@@ -234,6 +234,10 @@ class Klap20(SchemeInterface):
             e2 = e2 * e3
             if e1 == e2:
                 ret["status"] = "success"
+            else:
+                ret["status"] = "fail"
+                ret["message"] = "e1 != e2"
+                logging.error(ret["message"])
         else:
             ret["message"] = f"Phase not supported for {self.__class__.__name__}"
             logging.error(ret["message"])
@@ -276,6 +280,8 @@ class Klap20(SchemeInterface):
                 ret["status"] = "success"
             else:
                 ret["message"] = "e1 != e2"
+                logging.error(ret["message"])
         else:
             ret["message"] = "spk.dlog_G1_verify failed"
+            logging.error(ret["message"])
         return ret

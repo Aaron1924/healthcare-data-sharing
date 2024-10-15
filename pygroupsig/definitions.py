@@ -12,6 +12,13 @@ from pygroupsig.gl19.scheme import (
     MemberKey as Gl19MemKey,
     Signature as Gl19Signature,
 )
+from pygroupsig.ps16.scheme import (
+    Ps16,
+    GroupKey as Ps16GrpKey,
+    ManagerKey as Ps16MgrKey,
+    MemberKey as Ps16MemKey,
+    Signature as Ps16Signature,
+)
 import json
 from base64 import b64decode
 import logging
@@ -21,6 +28,7 @@ class Scheme:
     _SCHEMES = {
         "klap20": Klap20,
         "gl19": Gl19,
+        "ps16": Ps16,
     }
 
     def __new__(cls, scheme):
@@ -35,14 +43,17 @@ class Key:
         "group": {
             "klap20": Klap20GrpKey,
             "gl19": Gl19GrpKey,
+            "ps16": Ps16GrpKey,
         },
         "manager": {
             "klap20": Klap20MgrKey,
             "gl19": Gl19MgrKey,
+            "ps16": Ps16MgrKey,
         },
         "member": {
             "klap20": Klap20MemKey,
             "gl19": Gl19MemKey,
+            "ps16": Ps16MemKey,
         }
     }
 
@@ -75,6 +86,7 @@ class Signature:
     _SIGNATURES = {
         "klap20": Klap20Signature,
         "gl19": Gl19Signature,
+        "ps16": Ps16Signature,
     }
 
     def __new__(cls, scheme):

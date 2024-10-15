@@ -1,10 +1,8 @@
-import json
 import hashlib
 from pygroupsig.pairings.mcl import Fr, G1, G2, GT
 from pygroupsig.interfaces import SchemeInterface, KeyInterface, SignatureInterface
 from pygroupsig.baseclasses import B64Mixin
 import pygroupsig.spk as spk
-# from pygroupsig.definitions import SPKRep
 import logging
 import time
 
@@ -77,7 +75,6 @@ class Signature(B64Mixin, SignatureInterface):
 	# process checks that the signature was produced by a
 	# signer controlling a credential with the corresponding
 	# expiration date
-
 
     def info(self):
         return ("gl19", "signature"), (
@@ -184,7 +181,9 @@ class Gl19(SchemeInterface):
                 ret["s"] = s.to_b64()
                 ret["l"] = life
             else:
+                ret["status"] = "fail"
                 ret["message"] = "spk.dlog_G1_verify failed"
+                logging.error(ret["message"])
         else:
             ret["message"] = f"Phase not supported for {self.__class__.__name__}"
             logging.error(ret["message"])
@@ -249,9 +248,11 @@ class Gl19(SchemeInterface):
                 else:
                     ret["status"] = "fail"
                     ret["message"] = "e1 != e3"
+                    logging.error(ret["message"])
             else:
                 ret["status"] = "fail"
                 ret["message"] = "A is zero"
+                logging.error(ret["message"])
         else:
             ret["message"] = f"Phase not supported for {self.__class__.__name__}"
             logging.error(ret["message"])
@@ -385,4 +386,5 @@ class Gl19(SchemeInterface):
             ret["status"] = "success"
         else:
             ret["message"] = "spk.dlog_G1_verify failed"
+            logging.error(ret["message"])
         return ret
