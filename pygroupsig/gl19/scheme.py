@@ -1,13 +1,20 @@
 import hashlib
 from pygroupsig.pairings.mcl import Fr, G1, G2, GT
-from pygroupsig.interfaces import SchemeInterface, KeyInterface, SignatureInterface
+from pygroupsig.interfaces import SchemeInterface, ContainerInterface
 from pygroupsig.baseclasses import B64Mixin
 import pygroupsig.spk as spk
 import logging
 import time
 
 
-class GroupKey(B64Mixin, KeyInterface):
+_NAME = "gl19"
+_SEQ = 3
+_START = 0
+
+
+class GroupKey(B64Mixin, ContainerInterface):
+    CTYPE = "group"
+
     def __init__(self):
         self.g1 = G1() # Random generator of G1
         self.g2 = G2() # Random generator of G2
@@ -21,24 +28,30 @@ class GroupKey(B64Mixin, KeyInterface):
         self.epk = G1() # Extractor public key
 
     def info(self):
-        return ("gl19", "group"), (
+        return (_NAME, self.CTYPE), (
             "g1", "g2", "g",
             "h", "h1", "h2", "h3",
             "ipk", "cpk", "epk"
         )
 
 
-class ManagerKey(B64Mixin, KeyInterface):
+class ManagerKey(B64Mixin, ContainerInterface):
+    CTYPE = "manager"
+
     def __init__(self):
         self.isk = Fr() # Issuer secret key
         self.csk = Fr() # Converter secret key
         self.esk = Fr() # Extractor secret key
 
     def info(self):
-        return ("gl19", "manager"), ("isk", "csk", "esk")
+        return (_NAME, self.CTYPE), (
+            "isk", "csk", "esk"
+        )
 
 
-class MemberKey(B64Mixin, KeyInterface):
+class MemberKey(B64Mixin, ContainerInterface):
+    CTYPE = "member"
+
     def __init__(self):
         self.A = G1() # A = (H*h2^s*g1)^(1/isk+x)
         self.x = Fr() # Randomly picked by the Issuer
@@ -51,14 +64,16 @@ class MemberKey(B64Mixin, KeyInterface):
         self.h3d = G1() # Used in signatures. h3d = h3^d
 
     def info(self):
-        return ("gl19", "member"), (
+        return (_NAME, self.CTYPE), (
             "A", "x", "y", "s",
             "l", "d",
             "H", "h2s", "h3d"
         )
 
 
-class Signature(B64Mixin, SignatureInterface):
+class Signature(B64Mixin, ContainerInterface):
+    CTYPE = "signature"
+
     def __init__(self):
         self.AA = G1()
         self.A_ = G1()
@@ -77,7 +92,7 @@ class Signature(B64Mixin, SignatureInterface):
 	# expiration date
 
     def info(self):
-        return ("gl19", "signature"), (
+        return (_NAME, self.CTYPE), (
             "AA", "A_", "d", "c", "s",
             "nym1", "nym2",
             "ehy1", "ehy2",
@@ -86,9 +101,9 @@ class Signature(B64Mixin, SignatureInterface):
 
 
 class Gl19(SchemeInterface):
-    NAME = "GL19"
-    SEQ = 3
-    START = 0
+    NAME = _NAME.upper()
+    SEQ = _SEQ
+    START = _START
     LIFETIME = 60 * 60 * 24 * 14 # two weeks
     # TODO: add lifetime setter
 

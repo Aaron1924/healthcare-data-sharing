@@ -2,6 +2,10 @@ from abc import ABCMeta, abstractmethod
 
 
 class SchemeInterface(metaclass=ABCMeta):
+    NAME = ""
+    SEQ = -1
+    START = -1
+
     @abstractmethod
     def setup(self):
         """
@@ -27,7 +31,7 @@ class SchemeInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
-    def sign(self, message):
+    def sign(self, message, key):
         """
         Type of functions for signing messages.
         """
@@ -39,10 +43,20 @@ class SchemeInterface(metaclass=ABCMeta):
         """
 
 
-class KeyInterface(metaclass=ABCMeta):
-    # @abstractmethod
-    # def to_b64(self):
-    #     ...
+class ContainerInterface(metaclass=ABCMeta):
+    CTYPE = ""
+
+    @abstractmethod
+    def to_b64(self):
+        """
+        Export internal properties to base64
+        """
+
+    @abstractmethod
+    def info(self):
+        """
+        Listing of internal properties
+        """
 
     # @abstractmethod
     # def from_b64(self):
@@ -51,19 +65,3 @@ class KeyInterface(metaclass=ABCMeta):
     # @abstractmethod
     # def to_string(self):
     #     ...
-    ...
-
-
-class SignatureInterface(metaclass=ABCMeta):
-    # @abstractmethod
-    # def to_b64(self):
-    #     ...
-
-    # @abstractmethod
-    # def from_b64(self):
-    #     ,,,
-
-    # @abstractmethod
-    # def to_string(self):
-    #     ...
-    ...

@@ -1,14 +1,20 @@
 import json
 import hashlib
 from pygroupsig.pairings.mcl import Fr, G1, G2, GT
-from pygroupsig.interfaces import SchemeInterface, KeyInterface, SignatureInterface
+from pygroupsig.interfaces import SchemeInterface, ContainerInterface
 from pygroupsig.baseclasses import B64Mixin
 import pygroupsig.spk as spk
-# from pygroupsig.definitions import SPKRep
 import logging
 
 
-class GroupKey(B64Mixin, KeyInterface):
+_NAME = "klap20"
+_SEQ = 3
+_START = 0
+
+
+class GroupKey(B64Mixin, ContainerInterface):
+    CTYPE = "group"
+
     def __init__(self):
         self.g = G1() # Random generator of G1
         self.gg = G2() # Random generator of G1
@@ -18,10 +24,16 @@ class GroupKey(B64Mixin, KeyInterface):
         self.ZZ1 = G2() # gg^z1 (z1 is part of mgrkey)
 
     def info(self):
-        return ("klap20", "group"), ("g", "gg", "XX", "YY", "ZZ0", "ZZ1")
+        return (_NAME, self.CTYPE), (
+            "g", "gg",
+            "XX", "YY",
+            "ZZ0", "ZZ1"
+        )
 
 
-class ManagerKey(B64Mixin, KeyInterface):
+class ManagerKey(B64Mixin, ContainerInterface):
+    CTYPE = "manager"
+
     def __init__(self):
         self.x = Fr() # Issuer component x
         self.y = Fr() # Issuer component y
@@ -29,10 +41,15 @@ class ManagerKey(B64Mixin, KeyInterface):
         self.z1 = Fr() # Opener component z_1
 
     def info(self):
-        return ("klap20", "manager"), ("x", "y", "z0", "z1")
+        return (_NAME, self.CTYPE), (
+            "x", "y",
+            "z0", "z1"
+        )
 
 
-class MemberKey(B64Mixin, KeyInterface):
+class MemberKey(B64Mixin, ContainerInterface):
+    CTYPE = "member"
+
     def __init__(self):
         self.alpha = Fr()
         self.u = G1()
@@ -40,10 +57,14 @@ class MemberKey(B64Mixin, KeyInterface):
         self.w = G1()
 
     def info(self):
-        return ("klap20", "member"), ("alpha", "u", "v", "w")
+        return (_NAME, self.CTYPE), (
+            "alpha", "u", "v", "w"
+        )
 
 
-class Signature(B64Mixin, SignatureInterface):
+class Signature(B64Mixin, ContainerInterface):
+    CTYPE = "signature"
+
     def __init__(self):
         self.uu = G1()
         self.vv = G1()
@@ -52,13 +73,16 @@ class Signature(B64Mixin, SignatureInterface):
         self.s = Fr()
 
     def info(self):
-        return ("klap20", "signature"), ("uu", "vv", "ww", "c", "s")
+        return (_NAME, self.CTYPE), (
+            "uu", "vv", "ww",
+            "c", "s"
+        )
 
 
 class Klap20(SchemeInterface):
-    NAME = "KLAP20"
-    SEQ = 3
-    START = 0
+    NAME = _NAME.upper()
+    SEQ = _SEQ
+    START = _START
 
     def __init__(self):
         self.grpkey = GroupKey()

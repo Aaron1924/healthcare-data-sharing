@@ -1,13 +1,19 @@
 import hashlib
 from pygroupsig.pairings.mcl import Fr, G1, G2, GT
-from pygroupsig.interfaces import SchemeInterface, KeyInterface, SignatureInterface
+from pygroupsig.interfaces import SchemeInterface, ContainerInterface
 from pygroupsig.baseclasses import B64Mixin
 import pygroupsig.spk as spk
-# from pygroupsig.definitions import SPKRep
 import logging
 
 
-class GroupKey(B64Mixin, KeyInterface):
+_NAME = "ps16"
+_SEQ = 3
+_START = 0
+
+
+class GroupKey(B64Mixin, ContainerInterface):
+    CTYPE = "group"
+
     def __init__(self):
         self.g = G1() # Random generator of G1
         self.gg = G2() # Random generator of G2
@@ -15,21 +21,26 @@ class GroupKey(B64Mixin, KeyInterface):
         self.Y = G2() # gg^y (y is part of mgrkey)
 
     def info(self):
-        return ("ps16", "group"), (
-            "g", "gg", "X", "Y",
+        return (_NAME, self.CTYPE), (
+            "g", "gg",
+            "X", "Y",
         )
 
 
-class ManagerKey(B64Mixin, KeyInterface):
+class ManagerKey(B64Mixin, ContainerInterface):
+    CTYPE = "manager"
+
     def __init__(self):
         self.x = Fr()
         self.y = Fr()
 
     def info(self):
-        return ("ps16", "manager"), ("x", "y")
+        return (_NAME, self.CTYPE), ("x", "y")
 
 
-class MemberKey(B64Mixin, KeyInterface):
+class MemberKey(B64Mixin, ContainerInterface):
+    CTYPE = "member"
+
     def __init__(self):
         self.sk = Fr()
         self.sigma1 = G1()
@@ -38,10 +49,14 @@ class MemberKey(B64Mixin, KeyInterface):
         self.e = GT() # e(sigma1,grpkey->Y)
 
     def info(self):
-        return ("ps16", "member"), ("sk", "sigma1", "sigma2", "e")
+        return (_NAME, self.CTYPE), (
+            "sk", "sigma1", "sigma2", "e"
+        )
 
 
-class Signature(B64Mixin, SignatureInterface):
+class Signature(B64Mixin, ContainerInterface):
+    CTYPE = "signature"
+
     def __init__(self):
         self.sigma1 = G1()
         self.sigma2 = G1()
@@ -49,13 +64,16 @@ class Signature(B64Mixin, SignatureInterface):
         self.s = Fr()
 
     def info(self):
-        return ("ps16", "signature"), ("sigma1", "sigma2", "c", "s")
+        return (_NAME, self.CTYPE), (
+            "sigma1", "sigma2",
+            "c", "s"
+        )
 
 
 class Ps16(SchemeInterface):
-    NAME = "PS16"
-    SEQ = 3
-    START = 0
+    NAME = _NAME.upper()
+    SEQ = _SEQ
+    START = _START
 
     def __init__(self):
         self.grpkey = GroupKey()
