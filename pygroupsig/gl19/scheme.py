@@ -1,78 +1,63 @@
 import hashlib
-from pygroupsig.pairings.mcl import Fr, G1, G2, GT
-from pygroupsig.interfaces import SchemeInterface, ContainerInterface
-from pygroupsig.baseclasses import B64Mixin
-import pygroupsig.spk as spk
 import logging
 import time
 
+import pygroupsig.spk as spk
+from pygroupsig.baseclasses import B64Mixin, InfoMixin
+from pygroupsig.interfaces import ContainerInterface, SchemeInterface
+from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
 _NAME = "gl19"
 _SEQ = 3
 _START = 0
 
 
-class GroupKey(B64Mixin, ContainerInterface):
-    CTYPE = "group"
+class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "group"
 
     def __init__(self):
-        self.g1 = G1() # Random generator of G1
-        self.g2 = G2() # Random generator of G2
-        self.g = G1() # Random generator of G1
-        self.h = G1() # Random generator of G1
-        self.h1 = G1() # Random generator of G1
-        self.h2 = G1() # Random generator of G1
-        self.h3 = G1() # Random generator of G1. Used for setting expiration date of member creds
-        self.ipk = G2() # Issuer public key
-        self.cpk = G1() # Converter public key
-        self.epk = G1() # Extractor public key
-
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "g1", "g2", "g",
-            "h", "h1", "h2", "h3",
-            "ipk", "cpk", "epk"
-        )
+        self.g1 = G1()  # Random generator of G1
+        self.g2 = G2()  # Random generator of G2
+        self.g = G1()  # Random generator of G1
+        self.h = G1()  # Random generator of G1
+        self.h1 = G1()  # Random generator of G1
+        self.h2 = G1()  # Random generator of G1
+        self.h3 = G1()  # Random generator of G1. Used for setting expiration date of member creds
+        self.ipk = G2()  # Issuer public key
+        self.cpk = G1()  # Converter public key
+        self.epk = G1()  # Extractor public key
 
 
-class ManagerKey(B64Mixin, ContainerInterface):
-    CTYPE = "manager"
+class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "manager"
 
     def __init__(self):
-        self.isk = Fr() # Issuer secret key
-        self.csk = Fr() # Converter secret key
-        self.esk = Fr() # Extractor secret key
-
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "isk", "csk", "esk"
-        )
+        self.isk = Fr()  # Issuer secret key
+        self.csk = Fr()  # Converter secret key
+        self.esk = Fr()  # Extractor secret key
 
 
-class MemberKey(B64Mixin, ContainerInterface):
-    CTYPE = "member"
+class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "member"
 
     def __init__(self):
-        self.A = G1() # A = (H*h2^s*g1)^(1/isk+x)
-        self.x = Fr() # Randomly picked by the Issuer
-        self.y = Fr() # Randomly picked by the Member
-        self.s = Fr() # Randomly picked by the Issuer
-        self.l = -1 # Lifetime of the credential (UNIX time seconds)
-        self.d = Fr() # Fr element mapped from Hash(lifetime)
-        self.H = G1() # Member's "public key". H = h1^y
-        self.h2s = G1() # Used in signatures. h2s = h2^s
-        self.h3d = G1() # Used in signatures. h3d = h3^d
-
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "A", "x", "y", "s",
-            "l", "d",
-            "H", "h2s", "h3d"
-        )
+        self.A = G1()  # A = (H*h2^s*g1)^(1/isk+x)
+        self.x = Fr()  # Randomly picked by the Issuer
+        self.y = Fr()  # Randomly picked by the Member
+        self.s = Fr()  # Randomly picked by the Issuer
+        self.l = -1  # Lifetime of the credential (UNIX time seconds)
+        self.d = Fr()  # Fr element mapped from Hash(lifetime)
+        self.H = G1()  # Member's "public key". H = h1^y
+        self.h2s = G1()  # Used in signatures. h2s = h2^s
+        self.h3d = G1()  # Used in signatures. h3d = h3^d
 
 
-class Signature(B64Mixin, ContainerInterface):
-    CTYPE = "signature"
+class Signature(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "signature"
 
     def __init__(self):
         self.AA = G1()
@@ -87,24 +72,13 @@ class Signature(B64Mixin, ContainerInterface):
         self.expiration = -1
         # Expiration date. This is metainformation actually
         # pertaining to the signer's credential. The verify
-	# process checks that the signature was produced by a
-	# signer controlling a credential with the corresponding
-	# expiration date
-
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "AA", "A_", "d", "c", "s",
-            "nym1", "nym2",
-            "ehy1", "ehy2",
-            "expiration"
-        )
+        # process checks that the signature was produced by a
+        # signer controlling a credential with the corresponding
+        # expiration date
 
 
 class Gl19(SchemeInterface):
-    NAME = _NAME.upper()
-    SEQ = _SEQ
-    START = _START
-    LIFETIME = 60 * 60 * 24 * 14 # two weeks
+    LIFETIME = 60 * 60 * 24 * 14  # two weeks
     # TODO: add lifetime setter
 
     def __init__(self):
@@ -164,8 +138,7 @@ class Gl19(SchemeInterface):
             pic = Fr.from_b64(message["pic"])
             pis = Fr.from_b64(message["pis"])
 
-            if spk.dlog_G1_verify(H, self.grpkey.h1,
-                                  pic, pis, n.to_bytes()):
+            if spk.dlog_G1_verify(H, self.grpkey.h1, pic, pis, n.to_bytes()):
                 ## Pick x and s at random from Z*_p
                 x = Fr.from_random()
                 s = Fr.from_random()
@@ -200,7 +173,9 @@ class Gl19(SchemeInterface):
                 ret["message"] = "spk.dlog_G1_verify failed"
                 logging.error(ret["message"])
         else:
-            ret["message"] = f"Phase not supported for {self.__class__.__name__}"
+            ret["message"] = (
+                f"Phase not supported for {self.__class__.__name__}"
+            )
             logging.error(ret["message"])
         return ret
 
@@ -217,7 +192,9 @@ class Gl19(SchemeInterface):
             key.H.set_object(self.grpkey.h1 * key.y)
 
             ## Compute the SPK
-            pic, pis = spk.dlog_G1_sign(key.H, self.grpkey.h1, key.y, n.to_bytes())
+            pic, pis = spk.dlog_G1_sign(
+                key.H, self.grpkey.h1, key.y, n.to_bytes()
+            )
 
             ## Build the output message
             ret["status"] = "success"
@@ -251,7 +228,7 @@ class Gl19(SchemeInterface):
             # it must not be 0)
             if not key.A.is_zero():
                 e1 = GT.pairing(key.A, self.grpkey.g2)
-                e1 = e1 ** key.x
+                e1 = e1**key.x
                 e2 = GT.pairing(key.A, self.grpkey.ipk)
                 e1 = e1 * e2
                 aux = key.h2s + key.h3d
@@ -269,7 +246,9 @@ class Gl19(SchemeInterface):
                 ret["message"] = "A is zero"
                 logging.error(ret["message"])
         else:
-            ret["message"] = f"Phase not supported for {self.__class__.__name__}"
+            ret["message"] = (
+                f"Phase not supported for {self.__class__.__name__}"
+            )
             logging.error(ret["message"])
         return ret
 
@@ -336,27 +315,38 @@ class Gl19(SchemeInterface):
         g1h3d = self.grpkey.g1 + key.h3d
 
         y = [sig.nym1, sig.nym2, A_d, g1h3d, sig.ehy1, sig.ehy2]
-        g = [self.grpkey.g, self.grpkey.cpk, self.grpkey.h,
-             sig.AA, self.grpkey.h2, sig.d, self.grpkey.h1, self.grpkey.epk]
+        g = [
+            self.grpkey.g,
+            self.grpkey.cpk,
+            self.grpkey.h,
+            sig.AA,
+            self.grpkey.h2,
+            sig.d,
+            self.grpkey.h1,
+            self.grpkey.epk,
+        ]
         x = [aux_Zr, key.y, r2, r3, ss, alpha, negy, alpha2]
-        i = [(5, 0), # alpha, g
-             (5, 1), # alpha, cpk
-             (1, 2), # y, h
-             (0, 3), # -x, AA
-             (2, 4), # r2, h2
-             (3, 5), # r3, d
-             (4, 4), # ss, h2
-             (6, 6), # -y, h1
-             (7, 0), # alpha2, g
-             (7, 7), # alpha2, epk
-             (1, 2)] # y, h
+        i = [
+            (5, 0),  # alpha, g
+            (5, 1),  # alpha, cpk
+            (1, 2),  # y, h
+            (0, 3),  # -x, AA
+            (2, 4),  # r2, h2
+            (3, 5),  # r3, d
+            (4, 4),  # ss, h2
+            (6, 6),  # -y, h1
+            (7, 0),  # alpha2, g
+            (7, 7),  # alpha2, epk
+            (1, 2),
+        ]  # y, h
         prods = [1, 2, 2, 3, 1, 2]
 
         ## The SPK'ed message becomes the message to sign concatenated with the
         ## credential expiration date
         sig.expiration = key.l
-        pic, pis = spk.rep_sign(y, g, x, i, prods,
-                                f"{sig.expiration}|{message}")
+        pic, pis = spk.rep_sign(
+            y, g, x, i, prods, f"{sig.expiration}|{message}"
+        )
         sig.c.set_object(pic)
         sig.s.extend(pis)
         return {
@@ -380,24 +370,35 @@ class Gl19(SchemeInterface):
         g1h3d = (self.grpkey.h3 * expiration) + self.grpkey.g1
 
         y = [sig.nym1, sig.nym2, A_d, g1h3d, sig.ehy1, sig.ehy2]
-        g = [self.grpkey.g, self.grpkey.cpk, self.grpkey.h,
-             sig.AA, self.grpkey.h2, sig.d, self.grpkey.h1, self.grpkey.epk]
-        i = [(5, 0), # alpha, g
-             (5, 1), # alpha, cpk
-             (1, 2), # y, h
-             (0, 3), # -x, AA
-             (2, 4), # r2, h2
-             (3, 5), # r3, d
-             (4, 4), # ss, h2
-             (6, 6), # -y, h1
-             (7, 0), # alpha2, g
-             (7, 7), # alpha2, epk
-             (1, 2)] # y, h
+        g = [
+            self.grpkey.g,
+            self.grpkey.cpk,
+            self.grpkey.h,
+            sig.AA,
+            self.grpkey.h2,
+            sig.d,
+            self.grpkey.h1,
+            self.grpkey.epk,
+        ]
+        i = [
+            (5, 0),  # alpha, g
+            (5, 1),  # alpha, cpk
+            (1, 2),  # y, h
+            (0, 3),  # -x, AA
+            (2, 4),  # r2, h2
+            (3, 5),  # r3, d
+            (4, 4),  # ss, h2
+            (6, 6),  # -y, h1
+            (7, 0),  # alpha2, g
+            (7, 7),  # alpha2, epk
+            (1, 2),
+        ]  # y, h
         prods = [1, 2, 2, 3, 1, 2]
 
         ## Verify SPK
-        if spk.rep_verify(y, g, i, prods,
-                          sig.c, sig.s, f"{sig.expiration}|{message}"):
+        if spk.rep_verify(
+            y, g, i, prods, sig.c, sig.s, f"{sig.expiration}|{message}"
+        ):
             ret["status"] = "success"
         else:
             ret["message"] = "spk.dlog_G1_verify failed"

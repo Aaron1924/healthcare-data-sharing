@@ -1,5 +1,6 @@
 import hashlib
-from pygroupsig.pairings.mcl import Fr, G1, G2
+
+from pygroupsig.pairings.mcl import G1, G2, Fr
 
 
 def sign(y, g, x, i, prods, b_n):
@@ -39,8 +40,14 @@ def sign(y, g, x, i, prods, b_n):
 
     # Push the indices
     for j in i:
-        bi = bytearray([j[0] & 0xFF, (j[0] & 0xFF00) >> 8,
-                        j[1] & 0xFF, (j[1] & 0xFF00) >> 8])
+        bi = bytearray(
+            [
+                j[0] & 0xFF,
+                (j[0] & 0xFF00) >> 8,
+                j[1] & 0xFF,
+                (j[1] & 0xFF00) >> 8,
+            ]
+        )
         h.update(bi)
 
     # Push the products
@@ -94,8 +101,14 @@ def verify(y, g, i, prods, pic, pis, b_n):
 
     # Push the indices
     for j in i:
-        bi = bytearray([j[0] & 0xFF, (j[0] & 0xFF00) >> 8,
-                        j[1] & 0xFF, (j[1] & 0xFF00) >> 8])
+        bi = bytearray(
+            [
+                j[0] & 0xFF,
+                (j[0] & 0xFF00) >> 8,
+                j[1] & 0xFF,
+                (j[1] & 0xFF00) >> 8,
+            ]
+        )
         h.update(bi)
 
     # Push the products
@@ -123,7 +136,7 @@ def rep_sign(y, g, x, i, prods, b_n):
         idx += 1
         if prods[j] > 1:
             ## We use prods to specify how the i indexes are 'assigned' per
-	    ## random 'challenge'
+            ## random 'challenge'
             for k in range(prods[j] - 1):
                 prod[j] = prod[j] + gr[idx]
                 idx += 1
@@ -148,8 +161,14 @@ def rep_sign(y, g, x, i, prods, b_n):
 
     # Push the indices
     for j in i:
-        bi = bytearray([j[0] & 0xFF, (j[0] & 0xFF00) >> 8,
-                        j[1] & 0xFF, (j[1] & 0xFF00) >> 8])
+        bi = bytearray(
+            [
+                j[0] & 0xFF,
+                (j[0] & 0xFF00) >> 8,
+                j[1] & 0xFF,
+                (j[1] & 0xFF00) >> 8,
+            ]
+        )
         h.update(bi)
 
     # Push the products
@@ -177,7 +196,7 @@ def rep_verify(y, g, i, prods, pic, pis, b_n):
         prod.append(y[j] * pic)
         if prods[j] >= 1:
             ## We use prods to specify how the i indexes are 'assigned' per
-	    ## random 'challenge'
+            ## random 'challenge'
             for k in range(prods[j]):
                 gs = g[i[idx][1]] * pis[i[idx][0]]
                 prod[j] = prod[j] + gs
@@ -204,8 +223,14 @@ def rep_verify(y, g, i, prods, pic, pis, b_n):
 
     # Push the indices
     for j in i:
-        bi = bytearray([j[0] & 0xFF, (j[0] & 0xFF00) >> 8,
-                        j[1] & 0xFF, (j[1] & 0xFF00) >> 8])
+        bi = bytearray(
+            [
+                j[0] & 0xFF,
+                (j[0] & 0xFF00) >> 8,
+                j[1] & 0xFF,
+                (j[1] & 0xFF00) >> 8,
+            ]
+        )
         h.update(bi)
 
     # Push the products

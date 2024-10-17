@@ -1,6 +1,14 @@
 [tool.mypy]
 cache_dir = "/dev/null"
 strict = true
-exclude = [
-    "tests/",
-]
+exclude = ["tests/"]
+
+[tool.ruff]
+line-length = 80
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 80
+

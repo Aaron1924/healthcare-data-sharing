@@ -1,6 +1,16 @@
 import json
-from base64 import b64encode, b64decode
+from base64 import b64decode, b64encode
+
 from pygroupsig.pairings.mcl import Fr
+
+
+class InfoMixin:
+    def __repr__(self):
+        rep = json.dumps({k: str(v) for k, v in vars(self).items()})
+        return f"{self.__class__} {rep}"
+
+    def info(self):
+        return (self._NAME, self._CTYPE), vars(self).keys()
 
 
 class B64Mixin:

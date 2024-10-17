@@ -1,61 +1,51 @@
 import hashlib
-from pygroupsig.pairings.mcl import Fr, G1, G2, GT
-from pygroupsig.interfaces import SchemeInterface, ContainerInterface
-from pygroupsig.baseclasses import B64Mixin
-import pygroupsig.spk as spk
 import logging
 
+import pygroupsig.spk as spk
+from pygroupsig.baseclasses import B64Mixin, InfoMixin
+from pygroupsig.interfaces import ContainerInterface, SchemeInterface
+from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
 _NAME = "ps16"
 _SEQ = 3
 _START = 0
 
 
-class GroupKey(B64Mixin, ContainerInterface):
-    CTYPE = "group"
+class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "group"
 
     def __init__(self):
-        self.g = G1() # Random generator of G1
-        self.gg = G2() # Random generator of G2
-        self.X = G2() # gg^x (x is part of mgrkey)
-        self.Y = G2() # gg^y (y is part of mgrkey)
-
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "g", "gg",
-            "X", "Y",
-        )
+        self.g = G1()  # Random generator of G1
+        self.gg = G2()  # Random generator of G2
+        self.X = G2()  # gg^x (x is part of mgrkey)
+        self.Y = G2()  # gg^y (y is part of mgrkey)
 
 
-class ManagerKey(B64Mixin, ContainerInterface):
-    CTYPE = "manager"
+class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "manager"
 
     def __init__(self):
         self.x = Fr()
         self.y = Fr()
 
-    def info(self):
-        return (_NAME, self.CTYPE), ("x", "y")
 
-
-class MemberKey(B64Mixin, ContainerInterface):
-    CTYPE = "member"
+class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "member"
 
     def __init__(self):
         self.sk = Fr()
         self.sigma1 = G1()
         self.sigma2 = G1()
         # TODO: remove e variable, not used
-        self.e = GT() # e(sigma1,grpkey->Y)
-
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "sk", "sigma1", "sigma2", "e"
-        )
+        self.e = GT()  # e(sigma1,grpkey->Y)
 
 
-class Signature(B64Mixin, ContainerInterface):
-    CTYPE = "signature"
+class Signature(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "signature"
 
     def __init__(self):
         self.sigma1 = G1()
@@ -63,18 +53,8 @@ class Signature(B64Mixin, ContainerInterface):
         self.c = Fr()
         self.s = Fr()
 
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "sigma1", "sigma2",
-            "c", "s"
-        )
-
 
 class Ps16(SchemeInterface):
-    NAME = _NAME.upper()
-    SEQ = _SEQ
-    START = _START
-
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
@@ -111,8 +91,7 @@ class Ps16(SchemeInterface):
             pic = Fr.from_b64(message["pic"])
             pis = Fr.from_b64(message["pis"])
 
-            if spk.dlog_G1_verify(tau, self.grpkey.g,
-                                  pic, pis, n.to_bytes()):
+            if spk.dlog_G1_verify(tau, self.grpkey.g, pic, pis, n.to_bytes()):
                 e1 = GT.pairing(tau, self.grpkey.Y)
                 e2 = GT.pairing(self.grpkey.g, ttau)
 
@@ -145,7 +124,9 @@ class Ps16(SchemeInterface):
                 ret["message"] = "spk.dlog_G1_verify failed"
                 logging.error(ret["message"])
         else:
-            ret["message"] = f"Phase not supported for {self.__class__.__name__}"
+            ret["message"] = (
+                f"Phase not supported for {self.__class__.__name__}"
+            )
             logging.error(ret["message"])
         return ret
 
@@ -162,7 +143,8 @@ class Ps16(SchemeInterface):
 
             ## Compute the SPK for sk
             pic, pis = spk.dlog_G1_sign(
-                tau, self.grpkey.g, key.sk, n.to_bytes())
+                tau, self.grpkey.g, key.sk, n.to_bytes()
+            )
 
             ## Build the output message
             ret["status"] = "success"
@@ -186,7 +168,9 @@ class Ps16(SchemeInterface):
             key.sigma2.set_b64(message["sigma2"])
             ret["status"] = "success"
         else:
-            ret["message"] = f"Phase not supported for {self.__class__.__name__}"
+            ret["message"] = (
+                f"Phase not supported for {self.__class__.__name__}"
+            )
             logging.error(ret["message"])
         return ret
 
@@ -206,7 +190,7 @@ class Ps16(SchemeInterface):
         # to fit this
         k = Fr.from_random()
         e = GT.pairing(sig.sigma1, self.grpkey.Y)
-        e = e ** k
+        e = e**k
 
         # c = hash(ps16_sig->sigma1,ps16_sig->sigma2,e,m)
         h = hashlib.sha256()
@@ -242,7 +226,7 @@ class Ps16(SchemeInterface):
 
         # R = (e1*e2)^-c*e3
         e1 = e1 * e2
-        e1 = e1 ** sig.c
+        e1 = e1**sig.c
         e1 = ~e1
         e1 = e1 * e3
 

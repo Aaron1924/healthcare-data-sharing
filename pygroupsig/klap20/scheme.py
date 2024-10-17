@@ -1,54 +1,44 @@
-import json
 import hashlib
-from pygroupsig.pairings.mcl import Fr, G1, G2, GT
-from pygroupsig.interfaces import SchemeInterface, ContainerInterface
-from pygroupsig.baseclasses import B64Mixin
-import pygroupsig.spk as spk
+import json
 import logging
 
+import pygroupsig.spk as spk
+from pygroupsig.baseclasses import B64Mixin, InfoMixin
+from pygroupsig.interfaces import ContainerInterface, SchemeInterface
+from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
 _NAME = "klap20"
 _SEQ = 3
 _START = 0
 
 
-class GroupKey(B64Mixin, ContainerInterface):
-    CTYPE = "group"
+class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "group"
 
     def __init__(self):
-        self.g = G1() # Random generator of G1
-        self.gg = G2() # Random generator of G1
-        self.XX = G2() # gg^x (x is part of mgrkey)
-        self.YY = G2() # gg^y (y is part of mgrkey)
-        self.ZZ0 = G2() # gg^z0 (z0 is part of mgrkey)
-        self.ZZ1 = G2() # gg^z1 (z1 is part of mgrkey)
-
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "g", "gg",
-            "XX", "YY",
-            "ZZ0", "ZZ1"
-        )
+        self.g = G1()  # Random generator of G1
+        self.gg = G2()  # Random generator of G1
+        self.XX = G2()  # gg^x (x is part of mgrkey)
+        self.YY = G2()  # gg^y (y is part of mgrkey)
+        self.ZZ0 = G2()  # gg^z0 (z0 is part of mgrkey)
+        self.ZZ1 = G2()  # gg^z1 (z1 is part of mgrkey)
 
 
-class ManagerKey(B64Mixin, ContainerInterface):
-    CTYPE = "manager"
+class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "manager"
 
     def __init__(self):
-        self.x = Fr() # Issuer component x
-        self.y = Fr() # Issuer component y
-        self.z0 = Fr() # Opener component z_0
-        self.z1 = Fr() # Opener component z_1
-
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "x", "y",
-            "z0", "z1"
-        )
+        self.x = Fr()  # Issuer component x
+        self.y = Fr()  # Issuer component y
+        self.z0 = Fr()  # Opener component z_0
+        self.z1 = Fr()  # Opener component z_1
 
 
-class MemberKey(B64Mixin, ContainerInterface):
-    CTYPE = "member"
+class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "member"
 
     def __init__(self):
         self.alpha = Fr()
@@ -56,14 +46,10 @@ class MemberKey(B64Mixin, ContainerInterface):
         self.v = G1()
         self.w = G1()
 
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "alpha", "u", "v", "w"
-        )
 
-
-class Signature(B64Mixin, ContainerInterface):
-    CTYPE = "signature"
+class Signature(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "signature"
 
     def __init__(self):
         self.uu = G1()
@@ -72,18 +58,8 @@ class Signature(B64Mixin, ContainerInterface):
         self.c = Fr()
         self.s = Fr()
 
-    def info(self):
-        return (_NAME, self.CTYPE), (
-            "uu", "vv", "ww",
-            "c", "s"
-        )
-
 
 class Klap20(SchemeInterface):
-    NAME = _NAME.upper()
-    SEQ = _SEQ
-    START = _START
-
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
@@ -142,16 +118,23 @@ class Klap20(SchemeInterface):
             u = G1.from_hash(h)
 
             y = [f, w, SS0, SS1, ff0, ff1]
-            g = [self.grpkey.g, u, self.grpkey.gg,
-                 self.grpkey.ZZ0, self.grpkey.ZZ1]
-            i = [(0, 0), # alpha, g
-                 (0, 1), # alpha, u
-                 (1, 2), # s0, gg
-                 (2, 2), # s1, gg
-                 (0, 2), # alpha, gg
-                 (1, 3), # s0, ZZ0
-                 (0, 2), # alpha, gg
-                 (2, 4)] # s1, ZZ1
+            g = [
+                self.grpkey.g,
+                u,
+                self.grpkey.gg,
+                self.grpkey.ZZ0,
+                self.grpkey.ZZ1,
+            ]
+            i = [
+                (0, 0),  # alpha, g
+                (0, 1),  # alpha, u
+                (1, 2),  # s0, gg
+                (2, 2),  # s1, gg
+                (0, 2),  # alpha, gg
+                (1, 3),  # s0, ZZ0
+                (0, 2),  # alpha, gg
+                (2, 4),
+            ]  # s1, ZZ1
             prods = [1, 1, 1, 1, 2, 2]
             if spk.verify(y, g, i, prods, pic, pis, n.to_bytes()):
                 w = w * self.mgrkey.y
@@ -175,7 +158,9 @@ class Klap20(SchemeInterface):
                 ret["message"] = "spk.verify failed"
                 logging.error(ret["message"])
         else:
-            ret["message"] = f"Phase not supported for {self.__class__.__name__}"
+            ret["message"] = (
+                f"Phase not supported for {self.__class__.__name__}"
+            )
             logging.error(ret["message"])
         return ret
 
@@ -220,17 +205,24 @@ class Klap20(SchemeInterface):
             ## TODO: Whats the usage of tau in this current phase?
 
             y = [f, key.w, SS0, SS1, ff0, ff1]
-            g = [self.grpkey.g, key.u, self.grpkey.gg,
-                 self.grpkey.ZZ0, self.grpkey.ZZ1]
+            g = [
+                self.grpkey.g,
+                key.u,
+                self.grpkey.gg,
+                self.grpkey.ZZ0,
+                self.grpkey.ZZ1,
+            ]
             x = [key.alpha, s0, s1]
-            i = [(0, 0), # alpha, g
-                 (0, 1), # alpha, u
-                 (1, 2), # s0, gg
-                 (2, 2), # s1, gg
-                 (0, 2), # alpha, gg
-                 (1, 3), # s0, ZZ0
-                 (0, 2), # alpha, gg
-                 (2, 4)] # s1, ZZ1
+            i = [
+                (0, 0),  # alpha, g
+                (0, 1),  # alpha, u
+                (1, 2),  # s0, gg
+                (2, 2),  # s1, gg
+                (0, 2),  # alpha, gg
+                (1, 3),  # s0, ZZ0
+                (0, 2),  # alpha, gg
+                (2, 4),
+            ]  # s1, ZZ1
             prods = [1, 1, 1, 1, 2, 2]
             pic, pis = spk.sign(y, g, x, i, prods, n.to_bytes())
             ## Need to send (n, f, w, SS0, SS1, ff0, ff1, pi): prepare ad hoc message
@@ -263,7 +255,9 @@ class Klap20(SchemeInterface):
                 ret["message"] = "e1 != e2"
                 logging.error(ret["message"])
         else:
-            ret["message"] = f"Phase not supported for {self.__class__.__name__}"
+            ret["message"] = (
+                f"Phase not supported for {self.__class__.__name__}"
+            )
             logging.error(ret["message"])
         return ret
 
@@ -290,8 +284,7 @@ class Klap20(SchemeInterface):
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
         ## Verify SPK
-        if spk.dlog_G1_verify(sig.ww, sig.uu,
-                              sig.c, sig.s, message):
+        if spk.dlog_G1_verify(sig.ww, sig.uu, sig.c, sig.s, message):
             # e1 = e(vv,gg)
             e1 = GT.pairing(sig.vv, self.grpkey.gg)
             # e2 = e(uu,XX)

@@ -1,6 +1,5 @@
-import os
 import ctypes
-
+import os
 
 # src/bn_c384_256.cpp
 MCLBN_FP_UNIT_SIZE = 6

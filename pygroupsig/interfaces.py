@@ -2,10 +2,6 @@ from abc import ABCMeta, abstractmethod
 
 
 class SchemeInterface(metaclass=ABCMeta):
-    NAME = ""
-    SEQ = -1
-    START = -1
-
     @abstractmethod
     def setup(self):
         """
@@ -44,8 +40,6 @@ class SchemeInterface(metaclass=ABCMeta):
 
 
 class ContainerInterface(metaclass=ABCMeta):
-    CTYPE = ""
-
     @abstractmethod
     def to_b64(self):
         """

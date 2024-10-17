@@ -1,7 +1,8 @@
 import ctypes
 import logging
-import pygroupsig.pairings.utils as ut
 from base64 import b64decode, b64encode
+
+import pygroupsig.pairings.utils as ut
 
 
 class Base(ctypes.Structure):
@@ -70,7 +71,7 @@ class Base(ctypes.Structure):
                 ctypes.c_char_p,
                 ctypes.c_size_t,
             ],
-            ctypes.c_size_t
+            ctypes.c_size_t,
         )
         func(self, buf, len(buf))
 
@@ -148,9 +149,7 @@ class Base(ctypes.Structure):
             return func(self)
 
     def _func(self, fn, argtypes, restype=None):
-        func = getattr(
-            ut.lib, self.SIG.format(self.__class__.__name__, fn)
-        )
+        func = getattr(ut.lib, self.SIG.format(self.__class__.__name__, fn))
         func.argtypes = argtypes
         func.restype = restype
         return func
@@ -302,8 +301,7 @@ class OneInvDivMixin:
 class MulFrMixin:
     def __mul__(self, y):
         func = self._func(
-            "mul",
-            [ctypes.POINTER(self.__class__)] * 2 + [ctypes.POINTER(Fr)]
+            "mul", [ctypes.POINTER(self.__class__)] * 2 + [ctypes.POINTER(Fr)]
         )
         ret = self.__class__()
         func(ret, self, y)
@@ -316,13 +314,11 @@ class MulFrMixin:
 class MulVecMixin:
     def muln(self, x, y):
         if len(x) != len(y):
-            logging.warn(
-                f"muln: len(x)={len(x)} != len(y)={len(y)}"
-            )
+            logging.warn(f"muln: len(x)={len(x)} != len(y)={len(y)}")
         func = self._func(
             "mulVec",
             [ctypes.POINTER(self.__class__)] * 2
-            + [ctypes.POINTER(Fr), ctypes.c_size_t]
+            + [ctypes.POINTER(Fr), ctypes.c_size_t],
         )
         func(self, x, y, min(len(x), len(y)))
 
@@ -338,8 +334,7 @@ class PowMixin:
 class PowFrMixin:
     def __pow__(self, y):
         func = self._func(
-            "pow",
-            [ctypes.POINTER(self.__class__)] * 2 + [ctypes.POINTER(Fr)]
+            "pow", [ctypes.POINTER(self.__class__)] * 2 + [ctypes.POINTER(Fr)]
         )
         ret = self.__class__()
         func(ret, self, y)
@@ -441,18 +436,19 @@ class Fp2(OneInvDivMixin, Base):
         return Fp.byte_size() * cls.D
 
 
-class G1(StrMixin, MulFrMixin, MulVecMixin,
-         HashAndMapMixin, GenPrngMixin, Base):
+class G1(
+    StrMixin, MulFrMixin, MulVecMixin, HashAndMapMixin, GenPrngMixin, Base
+):
     _fields_ = [("x", Fp), ("y", Fp), ("z", Fp)]
 
 
-class G2(StrMixin, MulFrMixin, MulVecMixin,
-         HashAndMapMixin, GenPrngMixin, Base):
+class G2(
+    StrMixin, MulFrMixin, MulVecMixin, HashAndMapMixin, GenPrngMixin, Base
+):
     _fields_ = [("x", Fp2), ("y", Fp2), ("z", Fp2)]
 
 
-class GT(StrMixin, OneInvDivMixin, MulVecMixin, PowFrMixin,
-         IntMixin, Base):
+class GT(StrMixin, OneInvDivMixin, MulVecMixin, PowFrMixin, IntMixin, Base):
     D = 12
     _fields_ = [("d", Fp * D)]
 
@@ -462,13 +458,11 @@ class GT(StrMixin, OneInvDivMixin, MulVecMixin, PowFrMixin,
 
     def pown(self, x, y):
         if len(x) != len(y):
-            logging.warn(
-                f"pown: len(x)={len(x)} != len(y)={len(y)}"
-            )
+            logging.warn(f"pown: len(x)={len(x)} != len(y)={len(y)}")
         func = self._func(
             "powVec",
             [ctypes.POINTER(self.__class__)] * 2
-            + [ctypes.POINTER(Fr), ctypes.c_size_t]
+            + [ctypes.POINTER(Fr), ctypes.c_size_t],
         )
         func(self, x, y, min(len(x), len(y)))
 
