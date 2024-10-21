@@ -84,7 +84,6 @@ class Gl19(SchemeInterface):
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
-        self.gml = {}
 
     def setup(self):
         ## Initializes the Manager key
@@ -401,6 +400,6 @@ class Gl19(SchemeInterface):
         ):
             ret["status"] = "success"
         else:
-            ret["message"] = "spk.dlog_G1_verify failed"
+            ret["message"] = "spk.rep_verify failed"
             logging.error(ret["message"])
         return ret

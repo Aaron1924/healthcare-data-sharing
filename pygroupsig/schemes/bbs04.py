@@ -9,7 +9,7 @@ from pygroupsig.interfaces import (
 from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
 _NAME = "bbs04"
-_SEQ = 3
+_SEQ = 1
 _START = 0
 
 

@@ -2,26 +2,31 @@ import json
 import logging
 from base64 import b64decode
 
-from pygroupsig.bbs04.scheme import Bbs04
-from pygroupsig.bbs04.scheme import GroupKey as Bbs04GrpKey
-from pygroupsig.bbs04.scheme import ManagerKey as Bbs04MgrKey
-from pygroupsig.bbs04.scheme import MemberKey as Bbs04MemKey
-from pygroupsig.bbs04.scheme import Signature as Bbs04Signature
-from pygroupsig.gl19.scheme import Gl19
-from pygroupsig.gl19.scheme import GroupKey as Gl19GrpKey
-from pygroupsig.gl19.scheme import ManagerKey as Gl19MgrKey
-from pygroupsig.gl19.scheme import MemberKey as Gl19MemKey
-from pygroupsig.gl19.scheme import Signature as Gl19Signature
-from pygroupsig.klap20.scheme import GroupKey as Klap20GrpKey
-from pygroupsig.klap20.scheme import Klap20
-from pygroupsig.klap20.scheme import ManagerKey as Klap20MgrKey
-from pygroupsig.klap20.scheme import MemberKey as Klap20MemKey
-from pygroupsig.klap20.scheme import Signature as Klap20Signature
-from pygroupsig.ps16.scheme import GroupKey as Ps16GrpKey
-from pygroupsig.ps16.scheme import ManagerKey as Ps16MgrKey
-from pygroupsig.ps16.scheme import MemberKey as Ps16MemKey
-from pygroupsig.ps16.scheme import Ps16
-from pygroupsig.ps16.scheme import Signature as Ps16Signature
+from pygroupsig.schemes.bbs04 import Bbs04
+from pygroupsig.schemes.bbs04 import GroupKey as Bbs04GrpKey
+from pygroupsig.schemes.bbs04 import ManagerKey as Bbs04MgrKey
+from pygroupsig.schemes.bbs04 import MemberKey as Bbs04MemKey
+from pygroupsig.schemes.bbs04 import Signature as Bbs04Signature
+from pygroupsig.schemes.dl21 import Dl21
+from pygroupsig.schemes.dl21 import GroupKey as Dl21GrpKey
+from pygroupsig.schemes.dl21 import ManagerKey as Dl21MgrKey
+from pygroupsig.schemes.dl21 import MemberKey as Dl21MemKey
+from pygroupsig.schemes.dl21 import Signature as Dl21Signature
+from pygroupsig.schemes.gl19 import Gl19
+from pygroupsig.schemes.gl19 import GroupKey as Gl19GrpKey
+from pygroupsig.schemes.gl19 import ManagerKey as Gl19MgrKey
+from pygroupsig.schemes.gl19 import MemberKey as Gl19MemKey
+from pygroupsig.schemes.gl19 import Signature as Gl19Signature
+from pygroupsig.schemes.klap20 import GroupKey as Klap20GrpKey
+from pygroupsig.schemes.klap20 import Klap20
+from pygroupsig.schemes.klap20 import ManagerKey as Klap20MgrKey
+from pygroupsig.schemes.klap20 import MemberKey as Klap20MemKey
+from pygroupsig.schemes.klap20 import Signature as Klap20Signature
+from pygroupsig.schemes.ps16 import GroupKey as Ps16GrpKey
+from pygroupsig.schemes.ps16 import ManagerKey as Ps16MgrKey
+from pygroupsig.schemes.ps16 import MemberKey as Ps16MemKey
+from pygroupsig.schemes.ps16 import Ps16
+from pygroupsig.schemes.ps16 import Signature as Ps16Signature
 
 
 class Scheme:
@@ -30,6 +35,7 @@ class Scheme:
         "gl19": Gl19,
         "ps16": Ps16,
         "bbs04": Bbs04,
+        "dl21": Dl21,
     }
 
     def __new__(cls, scheme):
@@ -46,18 +52,21 @@ class Key:
             "gl19": Gl19GrpKey,
             "ps16": Ps16GrpKey,
             "bbs04": Bbs04GrpKey,
+            "dl21": Dl21GrpKey,
         },
         "manager": {
             "klap20": Klap20MgrKey,
             "gl19": Gl19MgrKey,
             "ps16": Ps16MgrKey,
             "bbs04": Bbs04MgrKey,
+            "dl21": Dl21MgrKey,
         },
         "member": {
             "klap20": Klap20MemKey,
             "gl19": Gl19MemKey,
             "ps16": Ps16MemKey,
             "bbs04": Bbs04MemKey,
+            "dl21": Dl21MemKey,
         },
     }
 
@@ -92,6 +101,7 @@ class Signature:
         "gl19": Gl19Signature,
         "ps16": Ps16Signature,
         "bbs04": Bbs04Signature,
+        "dl21": Dl21Signature,
     }
 
     def __new__(cls, scheme):
