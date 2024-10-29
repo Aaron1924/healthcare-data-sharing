@@ -17,34 +17,34 @@ class Base(ctypes.Structure):
         return str(self)
 
     def is_zero(self):
-        return bool(self._no_args("isZero"))
+        return bool(self._call("isZero"))
 
     def __eq__(self, y):
-        return bool(self._one_arg("isEqual", y))
+        return bool(self._call("isEqual", y))
 
     def is_equal(self, y):
         return self.__eq__(y)
 
     def __neg__(self):
-        return self._no_args("neg", ret=True)
+        return self._call("neg", ret=True)
 
     def neg(self):
         return self.__neg__()
 
     def __add__(self, y):
-        return self._one_arg("add", y, ret=True)
+        return self._call("add", y, ret=True)
 
     def add(self, y):
         return self.__add__(y)
 
     def __sub__(self, y):
-        return self._one_arg("sub", y, ret=True)
+        return self._call("sub", y, ret=True)
 
     def sub(self, y):
         return self.__sub__(y)
 
     def __mul__(self, y):
-        return self._one_arg("mul", y, ret=True)
+        return self._call("mul", y, ret=True)
 
     def mul(self, y):
         return self.__mul__(y)
@@ -108,45 +108,36 @@ class Base(ctypes.Structure):
         return func()
 
     def to_file(self, file):
-        with open(file, "wb") as f:
+        with open(file, "w") as f:
             f.write(self.to_b64())
 
     def set_file(self, file):
-        with open(file, "rb") as f:
+        with open(file, "r") as f:
             return self.set_b64(f.read())
 
     @classmethod
     def from_file(cls, file):
-        with open(file, "rb") as f:
-            return cls.from_b64(f.read())
+        ret = cls()
+        ret.set_file(file)
+        return ret
 
-    def _one_arg(self, fn, y, ret=False):
-        argtypes = [ctypes.POINTER(self.__class__)] * 2
-        restype = ctypes.c_int
+    def _call(self, fn, y=None, ret=False):
+        argtypes = [ctypes.POINTER(self.__class__)] * (1 if y is None else 2)
+        restype = None if ret else ctypes.c_int
         if ret:
             argtypes.append(ctypes.POINTER(self.__class__))
-            restype = None
         func = self._func(fn, argtypes, restype)
         if ret:
             ret = self.__class__()
-            func(ret, self, y)
+            if y is None:
+                func(ret, self)
+            else:
+                func(ret, self, y)
             return ret
         else:
+            if y is None:
+                return func(self)
             return func(self, y)
-
-    def _no_args(self, fn, ret=False):
-        argtypes = [ctypes.POINTER(self.__class__)]
-        restype = ctypes.c_int
-        if ret:
-            argtypes.append(ctypes.POINTER(self.__class__))
-            restype = None
-        func = self._func(fn, argtypes, restype)
-        if ret:
-            ret = self.__class__()
-            func(ret, self)
-            return ret
-        else:
-            return func(self)
 
     def _func(self, fn, argtypes, restype=None):
         func = getattr(ut.lib, self.SIG.format(self.__class__.__name__, fn))
@@ -227,27 +218,6 @@ class HashEndianPrngCmpMixin:
         ret.set_hash(s)
         return ret
 
-    # def set_little_endian(self, s):
-    #     if isinstance(s, str):
-    #         s = s.encode()
-    #     elif not isinstance(s, bytes):
-    #         print(
-    #             f"Error: Invalid input type {s}, expected str/bytes"
-    #         )
-    #         exit(1)
-    #     func = self._func(
-    #         "setLittleEndianHashOf",
-    #         [
-    #             ctypes.POINTER(self.__class__),
-    #             ctypes.c_char_p,
-    #             ctypes.c_size_t,
-    #         ],
-    #         ctypes.c_int,
-    #     )
-    #     func(self, s, len(s))
-
-    # from_unformat_bytes = set_little_endian
-
     def set_random(self):
         func = self._func(
             "setByCSPRNG",
@@ -266,16 +236,16 @@ class HashEndianPrngCmpMixin:
         return ret
 
     def cmp(self, y):
-        return self._one_arg("cmp", y)
+        return self._call("cmp", y)
 
     def __gt__(self, y):
-        return self._one_arg("cmp", y) == 1
+        return self._call("cmp", y) == 1
 
     def __ge__(self, y):
         return self.__gt__(y) or self.__eq__(y)
 
     def __lt__(self, y):
-        return self._one_arg("cmp", y) == -1
+        return self._call("cmp", y) == -1
 
     def __le__(self, y):
         return self.__lt__(y) or self.__eq__(y)
@@ -283,16 +253,16 @@ class HashEndianPrngCmpMixin:
 
 class OneInvDivMixin:
     def is_one(self):
-        return bool(self._no_args("isOne"))
+        return bool(self._call("isOne"))
 
     def __invert__(self):
-        return self._no_args("inv", ret=True)
+        return self._call("inv", ret=True)
 
     def inv(self):
         return self.__invert__()
 
     def __truediv__(self, y):
-        return self._one_arg("div", y, ret=True)
+        return self._call("div", y, ret=True)
 
     def div(self, y):
         return self.__truediv__(y)
@@ -312,20 +282,22 @@ class MulFrMixin:
 
 
 class MulVecMixin:
-    def muln(self, x, y):
+    @classmethod
+    def muln(cls, x, y):
         if len(x) != len(y):
             logging.warn(f"muln: len(x)={len(x)} != len(y)={len(y)}")
-        func = self._func(
+        ret = cls()
+        func = ret._func(
             "mulVec",
-            [ctypes.POINTER(self.__class__)] * 2
-            + [ctypes.POINTER(Fr), ctypes.c_size_t],
+            [ctypes.POINTER(cls)] * 2 + [ctypes.POINTER(Fr), ctypes.c_size_t],
         )
-        func(self, x, y, min(len(x), len(y)))
+        func(ret, x, y, min(len(x), len(y)))
+        return ret
 
 
 class PowMixin:
     def __pow__(self, y):
-        return self._one_arg("pow", y, ret=True)
+        return self._call("pow", y, ret=True)
 
     def pow(self, y):
         return self.__pow__(y)
@@ -456,15 +428,17 @@ class GT(StrMixin, OneInvDivMixin, MulVecMixin, PowFrMixin, IntMixin, Base):
     def byte_size(cls):
         return Fp.byte_size() * cls.D
 
-    def pown(self, x, y):
+    @classmethod
+    def pown(cls, x, y):
         if len(x) != len(y):
             logging.warn(f"pown: len(x)={len(x)} != len(y)={len(y)}")
-        func = self._func(
+        ret = cls()
+        func = ret._func(
             "powVec",
-            [ctypes.POINTER(self.__class__)] * 2
-            + [ctypes.POINTER(Fr), ctypes.c_size_t],
+            [ctypes.POINTER(cls)] * 2 + [ctypes.POINTER(Fr), ctypes.c_size_t],
         )
-        func(self, x, y, min(len(x), len(y)))
+        func(ret, x, y, min(len(x), len(y)))
+        return ret
 
     @classmethod
     def pairing(cls, e1, e2):

@@ -131,7 +131,7 @@ class Bbs04(SchemeInterface):
 
             ## Update the GML
             mem_id = hashlib.sha256(key.A.to_bytes()).hexdigest()
-            self.gml[mem_id] = key.A
+            self.gml[mem_id] = (key.A,)
 
             ## Dump the key into a msg
             ret["status"] = "success"
@@ -248,7 +248,7 @@ class Bbs04(SchemeInterface):
 
         ## Get c as the element associated to the obtained hash value
         # salpha = ralpha + c*alpha
-        sig.c.set_object(Fr.from_hash(h.digest()))
+        sig.c.set_hash(h.digest())
         sig.salpha.set_object(sig.c * alpha)
         sig.salpha.set_object(sig.salpha + ralpha)
 

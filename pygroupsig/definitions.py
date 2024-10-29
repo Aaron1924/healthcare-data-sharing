@@ -7,11 +7,21 @@ from pygroupsig.schemes.bbs04 import GroupKey as Bbs04GrpKey
 from pygroupsig.schemes.bbs04 import ManagerKey as Bbs04MgrKey
 from pygroupsig.schemes.bbs04 import MemberKey as Bbs04MemKey
 from pygroupsig.schemes.bbs04 import Signature as Bbs04Signature
+from pygroupsig.schemes.cpy06 import Cpy06
+from pygroupsig.schemes.cpy06 import GroupKey as Cpy06GrpKey
+from pygroupsig.schemes.cpy06 import ManagerKey as Cpy06MgrKey
+from pygroupsig.schemes.cpy06 import MemberKey as Cpy06MemKey
+from pygroupsig.schemes.cpy06 import Signature as Cpy06Signature
 from pygroupsig.schemes.dl21 import Dl21
 from pygroupsig.schemes.dl21 import GroupKey as Dl21GrpKey
 from pygroupsig.schemes.dl21 import ManagerKey as Dl21MgrKey
 from pygroupsig.schemes.dl21 import MemberKey as Dl21MemKey
 from pygroupsig.schemes.dl21 import Signature as Dl21Signature
+from pygroupsig.schemes.dl21seq import Dl21seq
+from pygroupsig.schemes.dl21seq import GroupKey as Dl21seqGrpKey
+from pygroupsig.schemes.dl21seq import ManagerKey as Dl21seqMgrKey
+from pygroupsig.schemes.dl21seq import MemberKey as Dl21seqMemKey
+from pygroupsig.schemes.dl21seq import Signature as Dl21seqSignature
 from pygroupsig.schemes.gl19 import Gl19
 from pygroupsig.schemes.gl19 import GroupKey as Gl19GrpKey
 from pygroupsig.schemes.gl19 import ManagerKey as Gl19MgrKey
@@ -36,6 +46,8 @@ class Scheme:
         "ps16": Ps16,
         "bbs04": Bbs04,
         "dl21": Dl21,
+        "dl21seq": Dl21seq,
+        "cpy06": Cpy06,
     }
 
     def __new__(cls, scheme):
@@ -53,6 +65,8 @@ class Key:
             "ps16": Ps16GrpKey,
             "bbs04": Bbs04GrpKey,
             "dl21": Dl21GrpKey,
+            "dl21seq": Dl21seqGrpKey,
+            "cpy06": Cpy06GrpKey,
         },
         "manager": {
             "klap20": Klap20MgrKey,
@@ -60,6 +74,8 @@ class Key:
             "ps16": Ps16MgrKey,
             "bbs04": Bbs04MgrKey,
             "dl21": Dl21MgrKey,
+            "dl21seq": Dl21seqMgrKey,
+            "cpy06": Cpy06MgrKey,
         },
         "member": {
             "klap20": Klap20MemKey,
@@ -67,6 +83,8 @@ class Key:
             "ps16": Ps16MemKey,
             "bbs04": Bbs04MemKey,
             "dl21": Dl21MemKey,
+            "dl21seq": Dl21seqMemKey,
+            "cpy06": Cpy06MemKey,
         },
     }
 
@@ -102,6 +120,8 @@ class Signature:
         "ps16": Ps16Signature,
         "bbs04": Bbs04Signature,
         "dl21": Dl21Signature,
+        "dl21seq": Dl21seqSignature,
+        "cpy06": Cpy06Signature,
     }
 
     def __new__(cls, scheme):

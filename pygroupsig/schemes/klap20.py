@@ -143,13 +143,13 @@ class Klap20(SchemeInterface):
                 # Add the tuple (i,SS0,SS1,ff0,ff1,tau) to the GML
                 tau = GT.pairing(f, self.grpkey.gg)
                 # Currently, KLAP20 identities are just uint64_t's
-                h_id = hashlib.sha256()
-                h_id.update(SS0.to_bytes())
-                h_id.update(SS1.to_bytes())
-                h_id.update(ff0.to_bytes())
-                h_id.update(ff1.to_bytes())
-                h_id.update(tau.to_bytes())
-                mem_id = h_id.hexdigest()
+                h = hashlib.sha256()
+                h.update(SS0.to_bytes())
+                h.update(SS1.to_bytes())
+                h.update(ff0.to_bytes())
+                h.update(ff1.to_bytes())
+                h.update(tau.to_bytes())
+                mem_id = h.hexdigest()
                 self.gml[mem_id] = (SS0, SS1, ff0, ff1, tau)
                 ret["status"] = "success"
                 ret["v"] = v.to_b64()

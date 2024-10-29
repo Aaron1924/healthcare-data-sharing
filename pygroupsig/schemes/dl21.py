@@ -196,6 +196,13 @@ class Dl21(SchemeInterface):
         return ret
 
     def sign(self, message, key, scope="def"):
+        sig = self._common_sign(message, key, scope)
+        return {
+            "status": "success",
+            "signature": sig.to_b64(),
+        }
+
+    def _common_sign(self, message, key, scope):
         message = str(message)
         scope = str(scope)
         # r1, r2 \in_R Z_p
@@ -254,10 +261,7 @@ class Dl21(SchemeInterface):
         pic, pis = spk.rep_sign(y, g, x, i, prods, message)
         sig.c.set_object(pic)
         sig.s.extend(pis)
-        return {
-            "status": "success",
-            "signature": sig.to_b64(),
-        }
+        return sig
 
     def verify(self, message, signature, scope="def"):
         message = str(message)

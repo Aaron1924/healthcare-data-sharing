@@ -39,8 +39,6 @@ class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
         self.sk = Fr()
         self.sigma1 = G1()
         self.sigma2 = G1()
-        # TODO: remove e variable, not used
-        self.e = GT()  # e(sigma1,grpkey->Y)
 
 
 class Signature(B64Mixin, InfoMixin, ContainerInterface):
@@ -105,10 +103,10 @@ class Ps16(SchemeInterface):
                     sigma2 = sigma2 * u
 
                     ## Add the tuple (i,tau,ttau) to the GML
-                    h_id = hashlib.sha256()
-                    h_id.update(tau.to_bytes())
-                    h_id.update(ttau.to_bytes())
-                    mem_id = h_id.hexdigest()
+                    h = hashlib.sha256()
+                    h.update(tau.to_bytes())
+                    h.update(ttau.to_bytes())
+                    mem_id = h.hexdigest()
                     self.gml[mem_id] = (tau, ttau)
 
                     ## Mout = (sigma1,sigma2)
@@ -161,9 +159,8 @@ class Ps16(SchemeInterface):
             ## Check correctness of computation and update memkey
 
             # We have sk in memkey, so just need to copy the
-            # sigma1, sigma2 and e values from the received message,
+            # sigma1 and sigma2 values from the received message,
             # which is an exported (partial) memkey
-            ## TODO: actually, e is not exported by join_mgr
             key.sigma1.set_b64(message["sigma1"])
             key.sigma2.set_b64(message["sigma2"])
             ret["status"] = "success"

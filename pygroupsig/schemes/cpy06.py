@@ -1,0 +1,473 @@
+import hashlib
+import json
+import logging
+
+import pygroupsig.pairings.utils as ut
+import pygroupsig.spk as spk
+from pygroupsig.baseclasses import B64Mixin, InfoMixin
+from pygroupsig.interfaces import ContainerInterface, SchemeInterface
+from pygroupsig.pairings.mcl import G1, G2, GT, Fr
+
+_NAME = "cpy06"
+_SEQ = 3
+_START = 0
+
+
+class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "group"
+
+    def __init__(self):
+        self.q = G1()  # Q \in_R G1
+        self.r = G2()  # R = g2^\gamma; where g2 is G2's generator
+        self.w = G2()  # W \in_R G2 \setminus 1
+        self.x = G1()  # X = Z^(\xi_1^-1)
+        self.y = G1()  # Y = Z^(\xi_2^-1)
+        self.z = G1()  # Z \in_R G1 \setminus 1
+        # Optimizations
+        self.T5 = GT()  # T5 = e(g1, W). Used in sign
+        self.e2 = GT()  #  e2 = e(z,g2). Used in sign
+        self.e3 = GT()  # e3 = e(z,r). Used in sign
+        self.e4 = GT()  # e4 = e(g1,g2). Used in sign
+        self.e5 = GT()  # e5 = e(q,g2). Used in verify
+
+
+class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "manager"
+
+    def __init__(self):
+        self.xi1 = Fr()  # Exponent for tracing signatures. \xi_1 \in_R Z^*_p
+        self.xi2 = Fr()  # Exponent for tracing signatures. \xi_2 \in_R Z^*_p
+        self.gamma = (
+            Fr()
+        )  # Exponent for generating member keys. \gamma \in_R Z^*_p
+
+
+class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "member"
+
+    def __init__(self):
+        self.x = Fr()  # x \in_R Z^*_p (non-adaptively chosen by member)
+        self.t = Fr()  # t \in_R Z^*_p (chosen by manager)
+        self.A = G1()  # A = (q*g_1^x)^(1/t+\gamma)
+        self._y = Fr()  # Used only during the interactive join protocol. Ignored in export/import.
+        self._r = Fr()  # Used only during the interactive join protocol. Ignored in export/import.
+
+
+class Signature(B64Mixin, InfoMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "signature"
+
+    def __init__(self):
+        self.T1 = G1()
+        self.T2 = G1()
+        self.T3 = G1()
+        self.T4 = G2()
+        self.T5 = GT()
+        self.c = Fr()
+        self.sr1 = Fr()
+        self.sr2 = Fr()
+        self.sd1 = Fr()
+        self.sd2 = Fr()
+        self.sx = Fr()
+        self.st = Fr()
+
+
+class Cpy06(SchemeInterface):
+    def __init__(self):
+        self.grpkey = GroupKey()
+        self.mgrkey = ManagerKey()
+        self.gml = {}
+
+    def setup(self):
+        # \xi_1 \in_R Z^*_p
+        self.mgrkey.xi1.set_random()
+        # \xi_2 \in_R Z^*_p
+        self.mgrkey.xi2.set_random()
+        # \gamma \in_R Z^*_p
+        self.mgrkey.gamma.set_random()
+
+        ## Create group public key
+        # Q \in_R G1
+        self.grpkey.q.set_random()
+        # R = g2^\gamma
+        g2 = G2.from_str(ut.BLS12_381_Q)
+        self.grpkey.r.set_object(g2 * self.mgrkey.gamma)
+        # W \in_R G2 \setminus 1
+        self.grpkey.w.set_random()
+        # Z \in_R G1 \setminus 1
+        while self.grpkey.z.is_zero():
+            self.grpkey.z.set_random()
+        # X = Z^(\xi_1^-1)
+        inv = ~self.mgrkey.xi1
+        self.grpkey.x.set_object(self.grpkey.z * inv)
+        # Y = Z^(\xi_2^-1)
+        inv = ~self.mgrkey.xi2
+        self.grpkey.y.set_object(self.grpkey.z * inv)
+
+        ## For computation optimizations
+        # T5 = e(g1, W)
+        g1 = G1.from_str(ut.BLS12_381_P)
+        self.grpkey.T5.set_object(GT.pairing(g1, self.grpkey.w))
+
+        # e2 = e(z,g2)
+        self.grpkey.e2.set_object(GT.pairing(self.grpkey.z, g2))
+        # e3 = e(z,r)
+        self.grpkey.e3.set_object(GT.pairing(self.grpkey.z, self.grpkey.r))
+        # e4 = e(g1,g2)
+        self.grpkey.e4.set_object(GT.pairing(g1, g2))
+        # e5 = e(q,g2)
+        self.grpkey.e5.set_object(GT.pairing(self.grpkey.q, g2))
+
+    def join_mgr(self, phase, message=None):
+        ret = {"status": "error"}
+        if phase == 0:
+            ## Generate random u, v from Z^*_p
+            u = Fr.from_random()
+            v = Fr.from_random()
+
+            ## Send u, v, I to member
+            ret["status"] = "success"
+            ret["u"] = u.to_b64()
+            ret["v"] = v.to_b64()
+        elif phase == 2:
+            if not isinstance(message, dict):
+                ret["message"] = "Invalid message type. Expected dict"
+                logging.error(ret["message"])
+                return ret
+            ## Input message is <I,pi,spk>
+            _I = G1.from_b64(message["I"])
+            pi = G1.from_b64(message["pi"])
+            pic = Fr.from_b64(message["pic"])
+            pis = [Fr.from_b64(el) for el in json.loads(message["pis"])]
+            g1 = G1.from_str(ut.BLS12_381_P)
+            Y = [pi, pi]
+            G = [g1, _I, self.grpkey.q]
+            i = [
+                (0, 0),  # x*g1 (g[0],x[0])
+                (1, 0),  # v*g1 (g[0],x[1])
+                (2, 1),  # u*I (g[1],x[2])
+                (3, 2),  # rr*q (g[2],x[3])
+            ]
+            prods = [1, 3]
+
+            if spk.rep_verify(Y, G, i, prods, pic, pis, pi.to_bytes()):
+                t = Fr.from_random()
+                # t \in_R Z^*_p
+                gammat = self.mgrkey.gamma + t
+                gammat = ~gammat
+                A = pi + self.grpkey.q
+                A = A * gammat
+
+                ## Write the partial memkey into mout
+                ret["status"] = "success"
+                ret["t"] = t.to_b64()
+                ret["A"] = A.to_b64()
+
+                ## Update the gml
+                h = hashlib.sha256()
+                h.update(A.to_bytes())
+                h.update(pi.to_bytes())
+                mem_id = h.hexdigest()
+                self.gml[mem_id] = (A, pi)
+            else:
+                ret["status"] = "fail"
+                ret["message"] = "spk.rep_verify failed"
+                logging.error(ret["message"])
+        else:
+            ret["message"] = (
+                f"Phase not supported for {self.__class__.__name__}"
+            )
+            logging.error(ret["message"])
+        return ret
+
+    def join_mem(self, phase, message, key):
+        ret = {"status": "error"}
+        if phase == 1:
+            if not isinstance(message, dict):
+                ret["message"] = "Invalid message type. Expected dict"
+                logging.error(ret["message"])
+                return ret
+            ## Read u and v from input message
+            u = Fr.from_b64(message["u"])
+            v = Fr.from_b64(message["v"])
+
+            ## Commit to randomness
+            # y,r \in_R Z^*_p
+            y = Fr.from_random()
+            r = Fr.from_random()
+
+            # I = yG1 + rQ
+            g1 = G1.from_str(ut.BLS12_381_P)
+            e = (G1 * 2)()
+            e[0].set_object(g1)
+            e[1].set_object(self.grpkey.q)
+            s = (Fr * 2)()
+            s[0].set_object(y)
+            s[1].set_object(r)
+            _I = G1.muln(e, s)
+
+            ## We "temporarily" store y and r by updating the received memkey. This is
+            ## simply to allow completing subsequent phases of this protocol run. Those
+            ## variables will be ignored if exporting/importing the key
+            key._y.set_object(y)
+            key._r.set_object(r)
+
+            ## memkey->x = u*memkey->y + v
+            key.x.set_object(u * key._y)
+            key.x.set_object(key.x + v)
+
+            ## pi = xi*G1
+            pi = g1 * key.x
+
+            ## rr = -r' = -ur
+            rr = u * key._r
+            rr = -rr
+
+            ## We'll be signing pi in the SPK
+            Y = [pi, pi]
+            G = [g1, _I, self.grpkey.q]
+            x = [key.x, v, u, rr]
+            i = [
+                (0, 0),  # x*g1 (g[0],x[0])
+                (1, 0),  # v*g1 (g[0],x[1])
+                (2, 1),  # u*I (g[1],x[2])
+                (3, 2),  # rr*q (g[2],x[3])
+            ]
+            prods = [1, 3]
+
+            pic, pis = spk.rep_sign(Y, G, x, i, prods, pi.to_bytes())
+            ret["status"] = "success"
+            ret["I"] = _I.to_b64()
+            ret["pi"] = pi.to_b64()
+            ret["pic"] = pic.to_b64()
+            ret["pis"] = json.dumps([p.to_b64() for p in pis])
+        elif phase == 3:
+            ## Import partial key from message
+            _t = Fr.from_b64(message["t"])
+            _A = G1.from_b64(message["A"])
+            g1 = G1.from_str(ut.BLS12_381_P)
+            g2 = G2.from_str(ut.BLS12_381_Q)
+            aux_g2 = g2 * _t
+            aux_g2 = aux_g2 + self.grpkey.r
+            aux_g1 = g1 * key.x
+            aux_g1 = aux_g1 + self.grpkey.q
+
+            aux_gt1 = GT.pairing(_A, aux_g2)
+            aux_gt2 = GT.pairing(aux_g1, g2)
+            if aux_gt1 == aux_gt2:
+                ## All good: transfer all data to memkey
+                key.t.set_object(_t)
+                key.A.set_object(_A)
+                ret["status"] = "success"
+            else:
+                ret["status"] = "fail"
+                ret["message"] = "aux_gt1 != aux_gt2"
+                logging.error(ret["message"])
+        else:
+            ret["message"] = (
+                f"Phase not supported for {self.__class__.__name__}"
+            )
+            logging.error(ret["message"])
+        return ret
+
+    def sign(self, message, key):
+        message = str(message)
+
+        # r1,r2,r3 \in_R Z_p
+        r1 = Fr.from_random()
+        r2 = Fr.from_random()
+        r3 = Fr.from_random()
+        # d1 = t*r1
+        d1 = key.t * r1
+        # d2 = t*r2
+        d2 = key.t * r2
+
+        sig = Signature()
+        # T1 = X^r1
+        sig.T1.set_object(self.grpkey.x * r1)
+        # T2 = Y^r2
+        sig.T2.set_object(self.grpkey.y * r2)
+        # T3 = A*Z^(r1+r2)
+        aux_r1r2 = r1 + r2
+        sig.T3.set_object(self.grpkey.z * aux_r1r2)
+        sig.T3.set_object(sig.T3 + key.A)
+        # T4 = W^r3
+        sig.T4.set_object(self.grpkey.w * r3)
+        # T5 = e(g1, T4)^x = e(g1, W)^(r3*x)
+        aux_r3x = r3 * key.x
+        sig.T5.set_object(self.grpkey.T5**aux_r3x)
+
+        # br1, br2,bd1,bd2,bt,bx \in_R Z_p
+        br1 = Fr.from_random()
+        br2 = Fr.from_random()
+        bd1 = Fr.from_random()
+        bd2 = Fr.from_random()
+        bt = Fr.from_random()
+        bx = Fr.from_random()
+
+        # B1 = X^br1
+        B1 = self.grpkey.x * br1
+        # B2 = Y^br2
+        B2 = self.grpkey.y * br2
+        # B3 = T1^bt/X^bd1
+        B3 = sig.T1 * bt
+        aux_xbd1 = self.grpkey.x * bd1
+        B3 = B3 - aux_xbd1
+        # B4 = T2^bt/Y^bd2
+        B4 = sig.T2 * bt
+        aux_ybd2 = self.grpkey.y * bd2
+        B4 = B4 - aux_ybd2
+        # B5 = e(g1,T4)^bx
+        g1 = G1.from_str(ut.BLS12_381_P)
+        B5 = GT.pairing(g1, sig.T4)
+        B5 = B5**bx
+        # B6 = e(T3,g2)^bt * e(z,g2)^(-bd1-bd2) * e(z,r)^(-br1-br2) * e(g1,g2)^(-bx)
+        g2 = G2.from_str(ut.BLS12_381_Q)
+        B6 = GT.pairing(sig.T3, g2)
+        B6 = B6**bt
+
+        ## aux_e: the rest (with the help of the optimizations is easier...)
+        # (-bd1-bd2)
+        aux_bd1bd2 = -bd1
+        aux_bd1bd2 = aux_bd1bd2 - bd2
+        # (-br1-br2)
+        aux_br1br2 = -br1
+        aux_br1br2 = aux_br1br2 - br2
+        # -bx
+        aux_bx = -bx
+        e = (GT * 3)()
+        s = (Fr * 3)()
+        e[0].set_object(self.grpkey.e2)
+        e[1].set_object(self.grpkey.e3)
+        e[2].set_object(self.grpkey.e4)
+        s[0].set_object(aux_bd1bd2)
+        s[1].set_object(aux_br1br2)
+        s[2].set_object(aux_bx)
+        aux_e = GT.pown(e, s)
+        B6 = B6 * aux_e
+
+        # c = hash(M,T1,T2,T3,T4,T5,B1,B2,B3,B4,B5,B6) \in Zp
+        h = hashlib.sha256()
+        h.update(message.encode())
+        h.update(sig.T1.to_bytes())
+        h.update(sig.T2.to_bytes())
+        h.update(sig.T3.to_bytes())
+        h.update(sig.T4.to_bytes())
+        h.update(sig.T5.to_bytes())
+        h.update(B1.to_bytes())
+        h.update(B2.to_bytes())
+        h.update(B3.to_bytes())
+        h.update(B4.to_bytes())
+        h.update(B5.to_bytes())
+        h.update(B6.to_bytes())
+        sig.c.set_hash(h.digest())
+
+        # sr1 = br1 + c*r1
+        aux_cmul = sig.c * r1
+        sig.sr1.set_object(br1 + aux_cmul)
+        # sr2 = br2 + c*r2
+        aux_cmul = sig.c * r2
+        sig.sr2.set_object(br2 + aux_cmul)
+        # sd1 = bd1 + c*d1
+        aux_cmul = sig.c * d1
+        sig.sd1.set_object(bd1 + aux_cmul)
+        # sd2 = bd2 + c*d2
+        aux_cmul = sig.c * d2
+        sig.sd2.set_object(bd2 + aux_cmul)
+        # sx = bx + c*x
+        aux_cmul = sig.c * key.x
+        sig.sx.set_object(bx + aux_cmul)
+        # st = bt + c*t
+        aux_cmul = sig.c * key.t
+        sig.st.set_object(bt + aux_cmul)
+        return {
+            "status": "success",
+            "signature": sig.to_b64(),
+        }
+
+    def verify(self, message, signature):
+        message = str(message)
+        ret = {"status": "fail"}
+        sig = Signature.from_b64(signature)
+
+        ## Re-derive B1, B2, B3, B4, B5 and B6 from the signature
+        # B1 = X^sr1/T1^c
+        aux_G1 = sig.T1 * sig.c
+        B1 = self.grpkey.x * sig.sr1
+        B1 = B1 - aux_G1
+        # B2 = X^sr2/T2^c
+        aux_G1 = sig.T2 * sig.c
+        B2 = self.grpkey.y * sig.sr2
+        B2 = B2 - aux_G1
+        # B3 = T1^st/X^sd1
+        aux_G1 = self.grpkey.x * sig.sd1
+        B3 = sig.T1 * sig.st
+        B3 = B3 - aux_G1
+        # B4 = T2^st/Y^sd2
+        aux_G1 = self.grpkey.y * sig.sd2
+        B4 = sig.T2 * sig.st
+        B4 = B4 - aux_G1
+        # B5 = e(g1,T4)^sx * T5^(-c)
+        g1 = G1.from_str(ut.BLS12_381_P)
+        aux_GT = sig.T5**sig.c
+        aux_GT = ~aux_GT
+        B5 = GT.pairing(g1, sig.T4)
+        B5 = B5**sig.sx
+        B5 = B5 * aux_GT
+        # B6 = e(T3,g2)^st * e(z,g2)^(-sd1-sd2) * e(z,r)^(-sr1-sr2) * e(g1,g2)^(-sx) * ( e(T3,r)/e(q,g2) )^c
+        # aux_e = e(z,g2)^(-sd1-sd2) * e(z,r)^(-sr1-sr2) * e(g1,g2)^(-sx)
+        aux_sd1sd2 = -sig.sd1
+        aux_sd1sd2 = aux_sd1sd2 - sig.sd2
+
+        aux_sr1sr2 = -sig.sr1
+        aux_sr1sr2 = aux_sr1sr2 - sig.sr2
+
+        aux_sx = -sig.sx
+        e = (GT * 3)()
+        s = (Fr * 3)()
+        e[0].set_object(self.grpkey.e2)
+        e[1].set_object(self.grpkey.e3)
+        e[2].set_object(self.grpkey.e4)
+        s[0].set_object(aux_sd1sd2)
+        s[1].set_object(aux_sr1sr2)
+        s[2].set_object(aux_sx)
+        aux_e = GT.pown(e, s)
+
+        # aux_GT = (e(T3,r)/e(q,g2))^c
+        aux_GT = GT.pairing(sig.T3, self.grpkey.r)
+        aux_GT = aux_GT / self.grpkey.e5
+        aux_GT = aux_GT**sig.c
+
+        # B6 = e(T3,g2)^st * aux_e * aux_GT
+        g2 = G2.from_str(ut.BLS12_381_Q)
+        B6 = GT.pairing(sig.T3, g2)
+        B6 = B6**sig.st
+        B6 = B6 * aux_e
+        B6 = B6 * aux_GT
+
+        ## Recompute the hash-challenge c
+        h = hashlib.sha256()
+        h.update(message.encode())
+        h.update(sig.T1.to_bytes())
+        h.update(sig.T2.to_bytes())
+        h.update(sig.T3.to_bytes())
+        h.update(sig.T4.to_bytes())
+        h.update(sig.T5.to_bytes())
+        h.update(B1.to_bytes())
+        h.update(B2.to_bytes())
+        h.update(B3.to_bytes())
+        h.update(B4.to_bytes())
+        h.update(B5.to_bytes())
+        h.update(B6.to_bytes())
+        c = Fr.from_hash(h.digest())
+
+        ## Compare the result with the received challenge
+        if sig.c == c:
+            ret["status"] = "success"
+        else:
+            ret["message"] = "sig.c != c"
+            logging.error(ret["message"])
+        return ret
