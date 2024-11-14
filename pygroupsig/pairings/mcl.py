@@ -362,10 +362,7 @@ class IntMixin:
 class GenPrngMixin:
     def set_random(self):
         gen = self.__class__()
-        if isinstance(gen, G1):
-            gen.set_str(ut.BLS12_381_P)
-        else:
-            gen.set_str(ut.BLS12_381_Q)
+        gen.set_generator()
         r = Fr()
         r.set_random()
         self.set_object(gen * r)
@@ -374,6 +371,20 @@ class GenPrngMixin:
     def from_random(cls):
         ret = cls()
         ret.set_random()
+        return ret
+
+
+class GeneratorMixin:
+    def set_generator(self):
+        s = ut.BLS12_381_P
+        if isinstance(self, G2):
+            s = ut.BLS12_381_Q
+        self.set_str(s)
+
+    @classmethod
+    def from_generator(cls):
+        ret = cls()
+        ret.set_generator()
         return ret
 
 
@@ -409,13 +420,25 @@ class Fp2(OneInvDivMixin, Base):
 
 
 class G1(
-    StrMixin, MulFrMixin, MulVecMixin, HashAndMapMixin, GenPrngMixin, Base
+    GeneratorMixin,
+    StrMixin,
+    MulFrMixin,
+    MulVecMixin,
+    HashAndMapMixin,
+    GenPrngMixin,
+    Base,
 ):
     _fields_ = [("x", Fp), ("y", Fp), ("z", Fp)]
 
 
 class G2(
-    StrMixin, MulFrMixin, MulVecMixin, HashAndMapMixin, GenPrngMixin, Base
+    GeneratorMixin,
+    StrMixin,
+    MulFrMixin,
+    MulVecMixin,
+    HashAndMapMixin,
+    GenPrngMixin,
+    Base,
 ):
     _fields_ = [("x", Fp2), ("y", Fp2), ("z", Fp2)]
 

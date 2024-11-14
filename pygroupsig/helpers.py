@@ -4,11 +4,13 @@ from base64 import b64decode, b64encode
 from pygroupsig.pairings.mcl import Fr
 
 
-class InfoMixin:
+class ReprMixin:
     def __repr__(self):
         rep = json.dumps({k: str(v) for k, v in vars(self).items()})
         return f"{self.__class__} {rep}"
 
+
+class InfoMixin:
     def info(self):
         return (self._NAME, self._CTYPE), vars(self).keys()
 
@@ -56,3 +58,21 @@ class B64Mixin:
         ret = cls()
         ret.set_b64(s)
         return ret
+
+
+class OpenMixin: ...
+
+
+class OVerifyMixin: ...
+
+
+class RevealTraceClaimCVerifyProveEqPEqVerifyMixin: ...
+
+
+class BlindConvertUnblindMixin: ...
+
+
+class IdentifyLinkLVerifyMixin: ...
+
+
+class SeqlinkSVerifyMixin: ...

@@ -2,7 +2,7 @@ import hashlib
 import logging
 
 import pygroupsig.spk as spk
-from pygroupsig.baseclasses import B64Mixin, InfoMixin
+from pygroupsig.helpers import B64Mixin, InfoMixin, ReprMixin
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
 from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
@@ -10,8 +10,10 @@ _NAME = "dl21"
 _SEQ = 3
 _START = 0
 
+logger = logging.getLogger(__name__)
 
-class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
+
+class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "group"
 
@@ -23,7 +25,7 @@ class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
         self.ipk = G2()  # Isseur public key
 
 
-class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
+class ManagerKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "manager"
 
@@ -31,7 +33,7 @@ class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
         self.isk = Fr()  # Issuer secret key
 
 
-class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
+class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "member"
 
@@ -44,7 +46,7 @@ class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
         self.h2s = G1()  # Used in signatures. h2s = h2^s
 
 
-class Signature(B64Mixin, InfoMixin, ContainerInterface):
+class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "signature"
 
@@ -57,7 +59,7 @@ class Signature(B64Mixin, InfoMixin, ContainerInterface):
         self.nym = G1()
 
 
-class Dl21(SchemeInterface):
+class DL21(ReprMixin, SchemeInterface):
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
@@ -89,7 +91,7 @@ class Dl21(SchemeInterface):
         elif phase == 2:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
                 return ret
             ## Second step by manager: compute credential from H and pi_H */
             ## Verify the proof
@@ -102,13 +104,10 @@ class Dl21(SchemeInterface):
                 x = Fr.from_random()
                 s = Fr.from_random()
 
-                # Set A = (H*h_2^s*g_1)^(1/isk+x)
-                h2s = self.grpkey.h2 * s
-                A = h2s + self.grpkey.g1
-                A = A + H
-                aux = self.mgrkey.isk + x
-                aux = ~aux
-                A = A * aux
+                # Set A = (H+h_2*s+g_1)*((isk+x)**-1)
+                A = (H + (self.grpkey.h2 * s) + self.grpkey.g1) * ~(
+                    self.mgrkey.isk + x
+                )
 
                 ## Mout = (A,x,s)
                 ## This is stored in a partially filled memkey, byte encoded into a
@@ -119,12 +118,12 @@ class Dl21(SchemeInterface):
                 ret["A"] = A.to_b64()
             else:
                 ret["message"] = "spk.dlog_G1_verify failed"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logging.error(ret["message"])
+            logger.error(ret["message"])
         return ret
 
     def join_mem(self, phase, message, key):
@@ -153,7 +152,7 @@ class Dl21(SchemeInterface):
         elif phase == 3:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
                 return ret
             ## Second step by the member: Check correctness of computation
             ## and update memkey
@@ -170,29 +169,26 @@ class Dl21(SchemeInterface):
             ## it must not be 0)
             if not key.A.is_zero():
                 # Check correctness: e(v,gg) = e(u,XX)e(w,YY)
-                e1 = GT.pairing(key.A, self.grpkey.g2)
-                e1 = e1**key.x
+                e1 = (GT.pairing(key.A, self.grpkey.g2)) ** key.x
                 e2 = GT.pairing(key.A, self.grpkey.ipk)
-                e1 = e1 * e2
-                aux = key.h2s + key.H
-                aux = aux + self.grpkey.g1
+                e4 = e1 * e2
+                aux = (key.h2s + key.H) + self.grpkey.g1
                 e3 = GT.pairing(aux, self.grpkey.g2)
-                e2 = e2 * e3
-                if e1 == e3:
+                if e4 == e3:
                     ret["status"] = "success"
                 else:
                     ret["status"] = "fail"
-                    ret["message"] = "e1 != e3"
-                    logging.error(ret["message"])
+                    ret["message"] = "e4 != e3"
+                    logger.error(ret["message"])
             else:
                 ret["status"] = "fail"
                 ret["message"] = "key.A is zero"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logging.error(ret["message"])
+            logger.error(ret["message"])
         return ret
 
     def sign(self, message, key, scope="def"):
@@ -210,35 +206,28 @@ class Dl21(SchemeInterface):
         r2 = Fr.from_random()
 
         sig = Signature()
-        # nym = Hash(scp)^y
-        hc = hashlib.sha256(scope.encode()).digest()
-        hscp = G1.from_hash(hc)
+        # nym = Hash(scp)*y
+        h = hashlib.sha256(scope.encode())
+        hscp = G1.from_hash(h.digest())
         sig.nym.set_object(hscp * key.y)
 
-        # AA = A^r1
+        # AA = A*r1
         sig.AA.set_object(key.A * r1)
 
-        # A_ = AA^{-x}(g1*h1^y*h2^s)^r1
         ## Good thing we precomputed much of this...
-        aux = key.H + key.h2s
-        aux = self.grpkey.g1 + aux
         # aux = (g1*h1^y*h2^s)^r1
-        aux = aux * r1
-        aux_Zr = -key.x
-        sig.A_.set_object(sig.AA * aux_Zr)
-        sig.A_.set_object(sig.A_ + aux)
+        aux = (self.grpkey.g1 + key.H + key.h2s) * r1
+        # A_ = AA*-x+(g1+h1*y+h2*s)*r1
+        sig.A_.set_object((sig.AA * -key.x) + aux)
 
-        # d = (g1*h1^y*h2^s)^r1*h2^{-r2}
-        aux_Zr = -r2
-        sig.d.set_object(self.grpkey.h2 * aux_Zr)
-        sig.d.set_object(aux + sig.d)
+        # d = (g1+h1*y+h2*s)*r1+h2*-r2
+        sig.d.set_object(aux + (self.grpkey.h2 * -r2))
 
-        # r3 = r1^{-1}
+        # r3 = r1**-1
         r3 = ~r1
 
         # ss = s - r2*r3
-        aux_Zr = r2 * r3
-        ss = key.s - aux_Zr
+        ss = key.s - (r2 * r3)
 
         ## Auxiliar variables for the spk
         aux_Zr = -key.x
@@ -276,8 +265,8 @@ class Dl21(SchemeInterface):
             e2 = GT.pairing(sig.A_, self.grpkey.g2)
             if e1 == e2:
                 ## Recompute hscp
-                hc = hashlib.sha256(scope.encode()).digest()
-                hscp = G1.from_hash(hc)
+                h = hashlib.sha256(scope.encode())
+                hscp = G1.from_hash(h.digest())
                 A_d = sig.A_ - sig.d
                 y = [sig.nym, A_d, self.grpkey.g1]
                 g = [hscp, sig.AA, self.grpkey.h2, sig.d, self.grpkey.h1]
@@ -295,11 +284,11 @@ class Dl21(SchemeInterface):
                     ret["status"] = "success"
                 else:
                     ret["message"] = "spk.rep_verify failed"
-                    logging.error(ret["message"])
+                    logger.error(ret["message"])
             else:
                 ret["message"] = "e1 != e2"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
         else:
             ret["message"] = "AA is zero"
-            logging.error(ret["message"])
+            logger.error(ret["message"])
         return ret

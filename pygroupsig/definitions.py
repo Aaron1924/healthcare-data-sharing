@@ -1,148 +1,143 @@
 import json
-import logging
 from base64 import b64decode
 
-from pygroupsig.schemes.bbs04 import Bbs04
-from pygroupsig.schemes.bbs04 import GroupKey as Bbs04GrpKey
-from pygroupsig.schemes.bbs04 import ManagerKey as Bbs04MgrKey
-from pygroupsig.schemes.bbs04 import MemberKey as Bbs04MemKey
-from pygroupsig.schemes.bbs04 import Signature as Bbs04Signature
-from pygroupsig.schemes.cpy06 import Cpy06
-from pygroupsig.schemes.cpy06 import GroupKey as Cpy06GrpKey
-from pygroupsig.schemes.cpy06 import ManagerKey as Cpy06MgrKey
-from pygroupsig.schemes.cpy06 import MemberKey as Cpy06MemKey
-from pygroupsig.schemes.cpy06 import Signature as Cpy06Signature
-from pygroupsig.schemes.dl21 import Dl21
-from pygroupsig.schemes.dl21 import GroupKey as Dl21GrpKey
-from pygroupsig.schemes.dl21 import ManagerKey as Dl21MgrKey
-from pygroupsig.schemes.dl21 import MemberKey as Dl21MemKey
-from pygroupsig.schemes.dl21 import Signature as Dl21Signature
-from pygroupsig.schemes.dl21seq import Dl21seq
-from pygroupsig.schemes.dl21seq import GroupKey as Dl21seqGrpKey
-from pygroupsig.schemes.dl21seq import ManagerKey as Dl21seqMgrKey
-from pygroupsig.schemes.dl21seq import MemberKey as Dl21seqMemKey
-from pygroupsig.schemes.dl21seq import Signature as Dl21seqSignature
-from pygroupsig.schemes.gl19 import Gl19
-from pygroupsig.schemes.gl19 import GroupKey as Gl19GrpKey
-from pygroupsig.schemes.gl19 import ManagerKey as Gl19MgrKey
-from pygroupsig.schemes.gl19 import MemberKey as Gl19MemKey
-from pygroupsig.schemes.gl19 import Signature as Gl19Signature
-from pygroupsig.schemes.klap20 import GroupKey as Klap20GrpKey
-from pygroupsig.schemes.klap20 import Klap20
-from pygroupsig.schemes.klap20 import ManagerKey as Klap20MgrKey
-from pygroupsig.schemes.klap20 import MemberKey as Klap20MemKey
-from pygroupsig.schemes.klap20 import Signature as Klap20Signature
-from pygroupsig.schemes.ps16 import GroupKey as Ps16GrpKey
-from pygroupsig.schemes.ps16 import ManagerKey as Ps16MgrKey
-from pygroupsig.schemes.ps16 import MemberKey as Ps16MemKey
-from pygroupsig.schemes.ps16 import Ps16
-from pygroupsig.schemes.ps16 import Signature as Ps16Signature
+from pygroupsig.schemes.bbs04 import BBS04
+from pygroupsig.schemes.bbs04 import GroupKey as BBS04GrpKey
+from pygroupsig.schemes.bbs04 import ManagerKey as BBS04MgrKey
+from pygroupsig.schemes.bbs04 import MemberKey as BBS04MemKey
+from pygroupsig.schemes.bbs04 import Signature as BBS04Signature
+from pygroupsig.schemes.cpy06 import CPY06
+from pygroupsig.schemes.cpy06 import GroupKey as CPY06GrpKey
+from pygroupsig.schemes.cpy06 import ManagerKey as CPY06MgrKey
+from pygroupsig.schemes.cpy06 import MemberKey as CPY06MemKey
+from pygroupsig.schemes.cpy06 import Signature as CPY06Signature
+from pygroupsig.schemes.dl21 import DL21
+from pygroupsig.schemes.dl21 import GroupKey as DL21GrpKey
+from pygroupsig.schemes.dl21 import ManagerKey as DL21MgrKey
+from pygroupsig.schemes.dl21 import MemberKey as DL21MemKey
+from pygroupsig.schemes.dl21 import Signature as DL21Signature
+from pygroupsig.schemes.dl21seq import DL21SEQ
+from pygroupsig.schemes.dl21seq import GroupKey as DL21SEQGrpKey
+from pygroupsig.schemes.dl21seq import ManagerKey as DL21SEQMgrKey
+from pygroupsig.schemes.dl21seq import MemberKey as DL21SEQMemKey
+from pygroupsig.schemes.dl21seq import Signature as DL21SEQSignature
+from pygroupsig.schemes.gl19 import GL19
+from pygroupsig.schemes.gl19 import GroupKey as GL19GrpKey
+from pygroupsig.schemes.gl19 import ManagerKey as GL19MgrKey
+from pygroupsig.schemes.gl19 import MemberKey as GL19MemKey
+from pygroupsig.schemes.gl19 import Signature as GL19Signature
+from pygroupsig.schemes.klap20 import KLAP20
+from pygroupsig.schemes.klap20 import GroupKey as KLAP20GrpKey
+from pygroupsig.schemes.klap20 import ManagerKey as KLAP20MgrKey
+from pygroupsig.schemes.klap20 import MemberKey as KLAP20MemKey
+from pygroupsig.schemes.klap20 import Signature as KLAP20Signature
+from pygroupsig.schemes.ps16 import PS16
+from pygroupsig.schemes.ps16 import GroupKey as PS16GrpKey
+from pygroupsig.schemes.ps16 import ManagerKey as PS16MgrKey
+from pygroupsig.schemes.ps16 import MemberKey as PS16MemKey
+from pygroupsig.schemes.ps16 import Signature as PS16Signature
+
+SCHEMES = {
+    "klap20": KLAP20,
+    "gl19": GL19,
+    "ps16": PS16,
+    "bbs04": BBS04,
+    "dl21": DL21,
+    "dl21seq": DL21SEQ,
+    "cpy06": CPY06,
+}
+
+KEYS = {
+    "group": {
+        "klap20": KLAP20GrpKey,
+        "gl19": GL19GrpKey,
+        "ps16": PS16GrpKey,
+        "bbs04": BBS04GrpKey,
+        "dl21": DL21GrpKey,
+        "dl21seq": DL21SEQGrpKey,
+        "cpy06": CPY06GrpKey,
+    },
+    "manager": {
+        "klap20": KLAP20MgrKey,
+        "gl19": GL19MgrKey,
+        "ps16": PS16MgrKey,
+        "bbs04": BBS04MgrKey,
+        "dl21": DL21MgrKey,
+        "dl21seq": DL21SEQMgrKey,
+        "cpy06": CPY06MgrKey,
+    },
+    "member": {
+        "klap20": KLAP20MemKey,
+        "gl19": GL19MemKey,
+        "ps16": PS16MemKey,
+        "bbs04": BBS04MemKey,
+        "dl21": DL21MemKey,
+        "dl21seq": DL21SEQMemKey,
+        "cpy06": CPY06MemKey,
+    },
+}
+
+SIGNATURES = {
+    "klap20": KLAP20Signature,
+    "gl19": GL19Signature,
+    "ps16": PS16Signature,
+    "bbs04": BBS04Signature,
+    "dl21": DL21Signature,
+    "dl21seq": DL21SEQSignature,
+    "cpy06": CPY06Signature,
+}
 
 
-class Scheme:
-    _SCHEMES = {
-        "klap20": Klap20,
-        "gl19": Gl19,
-        "ps16": Ps16,
-        "bbs04": Bbs04,
-        "dl21": Dl21,
-        "dl21seq": Dl21seq,
-        "cpy06": Cpy06,
-    }
-
-    def __new__(cls, scheme):
-        _name = scheme.lower()
-        if _name in cls._SCHEMES:
-            return cls._SCHEMES[_name]()
-        raise ValueError(f"Unknown scheme: {scheme}")
+def scheme(name):
+    _name = name.lower()
+    if _name in SCHEMES:
+        return SCHEMES[_name]()
+    raise ValueError(f"Unknown scheme: {name}")
 
 
-class Key:
-    _KEYS = {
-        "group": {
-            "klap20": Klap20GrpKey,
-            "gl19": Gl19GrpKey,
-            "ps16": Ps16GrpKey,
-            "bbs04": Bbs04GrpKey,
-            "dl21": Dl21GrpKey,
-            "dl21seq": Dl21seqGrpKey,
-            "cpy06": Cpy06GrpKey,
-        },
-        "manager": {
-            "klap20": Klap20MgrKey,
-            "gl19": Gl19MgrKey,
-            "ps16": Ps16MgrKey,
-            "bbs04": Bbs04MgrKey,
-            "dl21": Dl21MgrKey,
-            "dl21seq": Dl21seqMgrKey,
-            "cpy06": Cpy06MgrKey,
-        },
-        "member": {
-            "klap20": Klap20MemKey,
-            "gl19": Gl19MemKey,
-            "ps16": Ps16MemKey,
-            "bbs04": Bbs04MemKey,
-            "dl21": Dl21MemKey,
-            "dl21seq": Dl21seqMemKey,
-            "cpy06": Cpy06MemKey,
-        },
-    }
+def _parse_b64(b64):
+    if isinstance(b64, str):
+        b64 = b64.encode()
+    elif not isinstance(b64, bytes):
+        raise TypeError("Invalid b64. Expected str/bytes")
+    dec = b64decode(b64)
+    return json.loads(dec)
 
-    def __new__(cls, scheme, ktype):
-        _name = scheme.lower()
-        _ktype = ktype.lower()
-        if _ktype in cls._KEYS:
-            if _name in cls._KEYS[_ktype]:
-                return cls._KEYS[_ktype][_name]()
-            else:
-                raise ValueError(f"Unknown scheme: {scheme}")
-        else:
-            raise ValueError(f"Unknown key type: {ktype}")
 
-    @classmethod
-    def from_b64(cls, s):
-        if isinstance(s, str):
-            s = s.encode()
-        elif not isinstance(s, bytes):
-            msg = "Invalid key type. Expected str/bytes"
-            logging.error(msg)
-            return msg
-        data = json.loads(b64decode(s))
-        ret = cls(data["scheme"], data["type"])
+def key(name=None, ktype=None, b64=None):
+    if b64 is not None:
+        data = _parse_b64(b64)
+        ret = KEYS[data["type"]][data["scheme"]]()
         ret.set_b64(data["key"])
         return ret
-
-
-class Signature:
-    _SIGNATURES = {
-        "klap20": Klap20Signature,
-        "gl19": Gl19Signature,
-        "ps16": Ps16Signature,
-        "bbs04": Bbs04Signature,
-        "dl21": Dl21Signature,
-        "dl21seq": Dl21seqSignature,
-        "cpy06": Cpy06Signature,
-    }
-
-    def __new__(cls, scheme):
-        _name = scheme.lower()
-        if _name in cls._SIGNATURES:
-            return cls._SIGNATURES[_name]()
+    elif name is not None and ktype is not None:
+        _name = name.lower()
+        _ktype = ktype.lower()
+        if _ktype in KEYS:
+            if _name in KEYS[_ktype]:
+                return KEYS[_ktype][_name]()
+            else:
+                raise ValueError(f"Unknown scheme: {name}")
         else:
-            raise ValueError(f"Unknown scheme: {scheme}")
+            raise ValueError(f"Unknown key type: {ktype}")
+    else:
+        raise ValueError("At least on argument is required: name/ktype or b64")
 
-    @classmethod
-    def from_b64(cls, s):
-        if isinstance(s, str):
-            s = s.encode()
-        elif not isinstance(s, bytes):
-            msg = "Invalid signature type. Expected str/bytes"
-            logging.error(msg)
-            return msg
-        data = json.loads(b64decode(s))
-        ret = cls(data["scheme"])
+
+def signature(name=None, b64=None):
+    if b64 is not None:
+        data = _parse_b64(b64)
+        ret = SIGNATURES[data["scheme"]]()
         ret.set_b64(data["signature"])
         return ret
+    elif name is not None:
+        _name = scheme.lower()
+        if _name in SIGNATURES:
+            return SIGNATURES[_name]()
+        else:
+            raise ValueError(f"Unknown scheme: {name}")
+    else:
+        raise ValueError("At least on argument is required: name or b64")
 
 
 # class SPKDLog:
@@ -174,21 +169,3 @@ class Signature:
 #     def __init__(self):
 #         self.c = Fr()
 #         self.s = G2()
-
-
-class OpenMixin: ...
-
-
-class OVerifyMixin: ...
-
-
-class RevealTraceClaimCVerifyProveEqPEqVerifyMixin: ...
-
-
-class BlindConvertUnblindMixin: ...
-
-
-class IdentifyLinkLVerifyMixin: ...
-
-
-class SeqlinkSVerifyMixin: ...

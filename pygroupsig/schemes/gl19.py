@@ -3,7 +3,7 @@ import logging
 import time
 
 import pygroupsig.spk as spk
-from pygroupsig.baseclasses import B64Mixin, InfoMixin
+from pygroupsig.helpers import B64Mixin, InfoMixin, ReprMixin
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
 from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
@@ -11,8 +11,10 @@ _NAME = "gl19"
 _SEQ = 3
 _START = 0
 
+logger = logging.getLogger(__name__)
 
-class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
+
+class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "group"
 
@@ -29,7 +31,7 @@ class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
         self.epk = G1()  # Extractor public key
 
 
-class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
+class ManagerKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "manager"
 
@@ -39,7 +41,7 @@ class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
         self.esk = Fr()  # Extractor secret key
 
 
-class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
+class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "member"
 
@@ -55,7 +57,7 @@ class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
         self.h3d = G1()  # Used in signatures. h3d = h3^d
 
 
-class Signature(B64Mixin, InfoMixin, ContainerInterface):
+class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "signature"
 
@@ -77,7 +79,7 @@ class Signature(B64Mixin, InfoMixin, ContainerInterface):
         # expiration date
 
 
-class Gl19(SchemeInterface):
+class GL19(ReprMixin, SchemeInterface):
     LIFETIME = 60 * 60 * 24 * 14  # two weeks
     # TODO: add lifetime setter
 
@@ -129,7 +131,7 @@ class Gl19(SchemeInterface):
         elif phase == 2:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
                 return ret
             ## Compute credential from H and pi_H. Verify the proof
             n = G1.from_b64(message["n"])
@@ -143,23 +145,18 @@ class Gl19(SchemeInterface):
                 s = Fr.from_random()
 
                 life = str(int(time.time() + self.LIFETIME))
-                h = hashlib.sha256(life.encode()).digest()
+                h = hashlib.sha256(life.encode())
                 ## Modification w.r.t. the GL19 paper: we add a maximum lifetime
                 ## for member credentials. This is done by adding a second message
                 ## to be signed in the BBS+ signatures. This message will then be
                 ## "revealed" (i.e., shared in cleartext) in the SPK computed for
                 ## signing
-                d = Fr.from_hash(h)
+                d = Fr.from_hash(h.digest())
 
-                ## Set A = (H*h_2^s*h3^d*g_1)^(1/isk+x)
-                h2s = G1.from_object(self.grpkey.h2 * s)
-                h3d = G1.from_object(self.grpkey.h3 * d)
-                A = h2s + self.grpkey.g1
-                A = A + h3d
-                A = A + H
-                aux = self.mgrkey.isk + x
-                aux = ~aux
-                A = A * aux
+                ## Set A = (H+h_2*s+h3*d+g_1)*((isk+x)**-1)
+                h2s = self.grpkey.h2 * s
+                h3d = self.grpkey.h3 * d
+                A = (H + h2s + h3d + self.grpkey.g1) * ~(self.mgrkey.isk + x)
 
                 ## Mout = (A,x,s,l)
                 ret["status"] = "success"
@@ -170,12 +167,12 @@ class Gl19(SchemeInterface):
             else:
                 ret["status"] = "fail"
                 ret["message"] = "spk.dlog_G1_verify failed"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logging.error(ret["message"])
+            logger.error(ret["message"])
         return ret
 
     def join_mem(self, phase, message, key):
@@ -204,7 +201,7 @@ class Gl19(SchemeInterface):
         elif phase == 3:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
                 return ret
             ## Check correctness of computation and update memkey
 
@@ -218,37 +215,34 @@ class Gl19(SchemeInterface):
             key.h2s.set_object(self.grpkey.h2 * key.s)
 
             ## Recompute d and h3d from l
-            h = hashlib.sha256(str(key.l).encode()).digest()
-            key.d.set_hash(h)
+            h = hashlib.sha256(str(key.l).encode())
+            key.d.set_hash(h.digest())
             key.h3d.set_object(self.grpkey.h3 * key.d)
 
             ## Check correctness
             # A must not be 1 (since we use additive notation for G1,
             # it must not be 0)
             if not key.A.is_zero():
-                e1 = GT.pairing(key.A, self.grpkey.g2)
-                e1 = e1**key.x
+                e1 = (GT.pairing(key.A, self.grpkey.g2)) ** key.x
                 e2 = GT.pairing(key.A, self.grpkey.ipk)
-                e1 = e1 * e2
-                aux = key.h2s + key.h3d
-                aux = aux + key.H
-                aux = aux + self.grpkey.g1
+                e4 = e1 * e2
+                aux = key.H + key.h2s + key.h3d + self.grpkey.g1
                 e3 = GT.pairing(aux, self.grpkey.g2)
-                if e1 == e3:
+                if e4 == e3:
                     ret["status"] = "success"
                 else:
                     ret["status"] = "fail"
-                    ret["message"] = "e1 != e3"
-                    logging.error(ret["message"])
+                    ret["message"] = "e4 != e3"
+                    logger.error(ret["message"])
             else:
                 ret["status"] = "fail"
                 ret["message"] = "A is zero"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logging.error(ret["message"])
+            logger.error(ret["message"])
         return ret
 
     def sign(self, message, key):
@@ -258,51 +252,41 @@ class Gl19(SchemeInterface):
         r1 = Fr.from_random()
         r2 = Fr.from_random()
 
-        # nym1 = g1^alpha
+        # nym1 = g1*alpha
         sig = Signature()
         sig.nym1.set_object(self.grpkey.g * alpha)
 
-        # nym2 = cpk^alpha*h^y
-        aux1 = self.grpkey.cpk * alpha
-        aux2 = self.grpkey.h * key.y
-        sig.nym2.set_object(aux1 + aux2)
+        # nym2 = cpk*alpha+h*y
+        sig.nym2.set_object((self.grpkey.cpk * alpha) + (self.grpkey.h * key.y))
 
         ## Add extra encryption of h^y with epk
         alpha2 = Fr.from_random()
 
-        # ehy1 = g1^alpha2
+        # ehy1 = g*alpha2
         sig.ehy1.set_object(self.grpkey.g * alpha2)
 
-        # ehy2 = epk^alpha2*h^y
-        aux1 = self.grpkey.epk * alpha2
-        aux2 = self.grpkey.h * key.y
-        sig.ehy2.set_object(aux1 + aux2)
+        # ehy2 = epk*alpha2+h*y
+        sig.ehy2.set_object(
+            (self.grpkey.epk * alpha2) + (self.grpkey.h * key.y)
+        )
 
-        # AA = A^r1
+        # AA = A*r1
         sig.AA.set_object(key.A * r1)
 
-        # A_ = AA^{-x}(g1*h1^y*h2^s*h3d)^r1
         ## Good thing we precomputed much of this...
-        aux = key.H + key.h2s
-        aux = self.grpkey.g1 + aux
-        aux = key.h3d + aux
-        # aux = (g1*h1^y*h2^s*h3^d)^r1
-        aux = aux * r1
-        aux_Zr = -key.x
-        aux1 = sig.AA * aux_Zr
-        sig.A_.set_object(aux1 + aux)
+        # aux = (g1+h1*y+h2*s+h3*d)*r1
+        aux = (self.grpkey.g1 + key.H + key.h2s + key.h3d) * r1
+        # A_ = AA^{-x}(g1+h*y+h2*s+h3*d)*r1
+        sig.A_.set_object(sig.AA * -key.x + aux)
 
-        # d = (g1*h1^y*h2^s*h3^d)^r1*h2^{-r2}
-        aux_Zr = -r2
-        aux1 = self.grpkey.h2 * aux_Zr
-        sig.d.set_object(aux + aux1)
+        # d = (g1+h1*y+h2*s+h3*d)*r1+h2*-r2
+        sig.d.set_object(aux + (self.grpkey.h2 * -r2))
 
-        # r3 = r1^{-1}
+        # r3 = r1**-1
         r3 = ~r1
 
         # ss = s - r2*r3
-        aux_Zr = r2 * r3
-        ss = key.s - aux_Zr
+        ss = key.s - (r2 * r3)
 
         ## Auxiliar variables for the spk
         aux_Zr = -key.x
@@ -348,6 +332,7 @@ class Gl19(SchemeInterface):
         )
         sig.c.set_object(pic)
         sig.s.extend(pis)
+
         return {
             "status": "success",
             "signature": sig.to_b64(),
@@ -364,8 +349,8 @@ class Gl19(SchemeInterface):
         ## The last sizeof(uint64_t) bytes of the message contain the expiration
         ## date. Parse them, and recompute the h3d value, needed to verify the SPK
 
-        h = hashlib.sha256(str(sig.expiration).encode()).digest()
-        expiration = Fr.from_hash(h)
+        h = hashlib.sha256(str(sig.expiration).encode())
+        expiration = Fr.from_hash(h.digest())
         g1h3d = (self.grpkey.h3 * expiration) + self.grpkey.g1
 
         y = [sig.nym1, sig.nym2, A_d, g1h3d, sig.ehy1, sig.ehy2]
@@ -401,5 +386,5 @@ class Gl19(SchemeInterface):
             ret["status"] = "success"
         else:
             ret["message"] = "spk.rep_verify failed"
-            logging.error(ret["message"])
+            logger.error(ret["message"])
         return ret

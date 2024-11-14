@@ -1,6 +1,6 @@
 import hashlib
 
-from pygroupsig.pairings.mcl import G1, G2, Fr
+from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
 
 def sign(y, g, x, i, prods, b_n):
@@ -14,6 +14,7 @@ def sign(y, g, x, i, prods, b_n):
     ## Compute the challenge products
     prod = []
     for j in range(4):
+        # TODO: remove from_object
         if j < 2:
             pgr = G1.from_object(gr[j])
         else:
@@ -286,3 +287,90 @@ def dlog_G1_verify(G, g, pic, pis, b_n):
     ## Compare the result with c
     c = Fr.from_hash(h.digest())
     return c == pic
+
+
+def pairing_homomorphism_G2_sign(g, G, xx, b_n):
+    ## Pick random R from G2
+    rr = G2.from_random()
+    ## Compute the map
+    R = GT.pairing(g, rr)
+
+    ## Make hc = Hash(msg||g||G||R)
+    h = hashlib.sha256()
+    if isinstance(b_n, str):
+        b_n = b_n.encode()
+    h.update(b_n)
+    h.update(g.to_bytes())
+    h.update(G.to_bytes())
+    h.update(R.to_bytes())
+
+    ## Convert the hash to an integer
+    c = Fr.from_hash(h.digest())
+
+    # ss = rr+xx*c
+    ss = rr + (xx * c)
+    # pi = (s,c)
+    pic = Fr.from_object(c)
+    pis = G2.from_object(ss)
+    return pic, pis
+
+
+def pairing_homomorphism_G2_verify(g, G, pic, pis, b_n):
+    ## If pi is correct, then pi->c equals Hash(msg||g||G||e(g,pi->ss)/G**pi->c)
+    ## Compute e(g,pi->ss)/G**pi->c
+    Gc = G**pic
+    R = GT.pairing(g, pis) / Gc
+
+    # Compute the hash
+    h = hashlib.sha256()
+    if isinstance(b_n, str):
+        b_n = b_n.encode()
+    h.update(b_n)
+    h.update(g.to_bytes())
+    h.update(G.to_bytes())
+    h.update(R.to_bytes())
+
+    ## Compare the result with c
+    c = Fr.from_hash(h.digest())
+    return c == pic
+
+
+def sign1(xx, g1, g2, e1, e2, b_n):
+    # RR1 = e(g1,rr), RR2 = e(g2,rr)
+    rr = G2.from_random()
+    RR1 = GT.pairing(g1, rr)
+    RR2 = GT.pairing(g2, rr)
+
+    # c = Hash(g1,g2,e1,e2,RR1,RR2,msg)
+    h = hashlib.sha256()
+    h.update(g1.to_bytes())
+    h.update(g2.to_bytes())
+    h.update(e1.to_bytes())
+    h.update(e2.to_bytes())
+    h.update(RR1.to_bytes())
+    h.update(RR2.to_bytes())
+
+    c = Fr.from_hash(h.digest())
+    # s = rr + xx*c
+    s = rr + (xx * c)
+
+    pic = Fr.from_object(c)
+    pis = G2.from_object(s)
+    return pic, pis
+
+
+def verify1(pic, pis, g1, g2, e1, e2, b_n):
+    # RR1 = e(g1,pi->s)/e1**pi->c
+    RR1 = GT.pairing(g1, pis) / (e1**pic)
+    # RR2 = e(g2,pi->s)/e2**pi->c
+    RR2 = GT.pairing(g2, pis) / (e2**pic)
+    h = hashlib.sha256()
+    h.update(g1.to_bytes())
+    h.update(g2.to_bytes())
+    h.update(e1.to_bytes())
+    h.update(e2.to_bytes())
+    h.update(RR1.to_bytes())
+    h.update(RR2.to_bytes())
+
+    c = Fr.from_hash(h.digest())
+    return pic == c

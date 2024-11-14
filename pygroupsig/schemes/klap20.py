@@ -1,9 +1,10 @@
 import hashlib
 import json
 import logging
+import random
 
 import pygroupsig.spk as spk
-from pygroupsig.baseclasses import B64Mixin, InfoMixin
+from pygroupsig.helpers import B64Mixin, InfoMixin, ReprMixin
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
 from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
@@ -11,8 +12,10 @@ _NAME = "klap20"
 _SEQ = 3
 _START = 0
 
+logger = logging.getLogger(__name__)
 
-class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
+
+class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "group"
 
@@ -25,7 +28,7 @@ class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
         self.ZZ1 = G2()  # gg^z1 (z1 is part of mgrkey)
 
 
-class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
+class ManagerKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "manager"
 
@@ -36,7 +39,7 @@ class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
         self.z1 = Fr()  # Opener component z_1
 
 
-class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
+class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "member"
 
@@ -47,7 +50,7 @@ class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
         self.w = G1()
 
 
-class Signature(B64Mixin, InfoMixin, ContainerInterface):
+class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "signature"
 
@@ -59,7 +62,7 @@ class Signature(B64Mixin, InfoMixin, ContainerInterface):
         self.s = Fr()
 
 
-class Klap20(SchemeInterface):
+class KLAP20(ReprMixin, SchemeInterface):
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
@@ -99,7 +102,7 @@ class Klap20(SchemeInterface):
         elif phase == 2:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
                 return ret
             ## Import the (n,f,w,SSO,SS1,ff0,ff1,pic,pis) ad hoc message
             n = G1.from_b64(message["n"])
@@ -114,8 +117,8 @@ class Klap20(SchemeInterface):
             ## Check the SPK -- this will change with issue23
             ## Compute the SPK for sk -- this will be replaced in issue23
             # u = Hash(f)
-            h = hashlib.sha256(f.to_bytes()).digest()
-            u = G1.from_hash(h)
+            h = hashlib.sha256(f.to_bytes())
+            u = G1.from_hash(h.digest())
 
             y = [f, w, SS0, SS1, ff0, ff1]
             g = [
@@ -137,9 +140,7 @@ class Klap20(SchemeInterface):
             ]  # s1, ZZ1
             prods = [1, 1, 1, 1, 2, 2]
             if spk.verify(y, g, i, prods, pic, pis, n.to_bytes()):
-                w = w * self.mgrkey.y
-                u = u * self.mgrkey.x
-                v = u + w
+                v = (u * self.mgrkey.x) + (w * self.mgrkey.y)
                 # Add the tuple (i,SS0,SS1,ff0,ff1,tau) to the GML
                 tau = GT.pairing(f, self.grpkey.gg)
                 # Currently, KLAP20 identities are just uint64_t's
@@ -149,19 +150,20 @@ class Klap20(SchemeInterface):
                 h.update(ff0.to_bytes())
                 h.update(ff1.to_bytes())
                 h.update(tau.to_bytes())
-                mem_id = h.hexdigest()
-                self.gml[mem_id] = (SS0, SS1, ff0, ff1, tau)
+
+                self.gml[h.hexdigest()] = (SS0, SS1, ff0, ff1, tau)
+
                 ret["status"] = "success"
                 ret["v"] = v.to_b64()
             else:
                 ret["status"] = "fail"
                 ret["message"] = "spk.verify failed"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logging.error(ret["message"])
+            logger.error(ret["message"])
         return ret
 
     def join_mem(self, phase, message, key):
@@ -176,29 +178,25 @@ class Klap20(SchemeInterface):
             s0 = Fr.from_random()
             s1 = Fr.from_random()
 
-            # f = g^alpha
-            f = G1.from_object(self.grpkey.g * key.alpha)
+            # f = g*alpha
+            f = self.grpkey.g * key.alpha
             # u = Hash(f)
-            h = hashlib.sha256(f.to_bytes()).digest()
-            key.u.set_hash(h)
+            h = hashlib.sha256(f.to_bytes())
+            key.u.set_hash(h.digest())
 
-            # w = u^alpha
+            # w = u*alpha
             key.w.set_object(key.u * key.alpha)
 
-            # SS0 = gg^s0
-            SS0 = G2.from_object(self.grpkey.gg * s0)
+            # SS0 = gg*s0
+            SS0 = self.grpkey.gg * s0
+            # SS1 = gg*s1
+            SS1 = self.grpkey.gg * s1
 
-            # SS1 = gg^s1
-            SS1 = G2.from_object(self.grpkey.gg * s1)
-
-            # ff0 = gg^alpha*ZZ0^s0
-            ggalpha = G2.from_object(self.grpkey.gg * key.alpha)
-            ZZ0s0 = G2.from_object(self.grpkey.ZZ0 * s0)
-            ff0 = G2.from_object(ggalpha + ZZ0s0)
-
-            # ff1 = gg^alpha*ZZ1^s1
-            ZZ1s1 = G2.from_object(self.grpkey.ZZ1 * s1)
-            ff1 = G2.from_object(ggalpha + ZZ1s1)
+            ggalpha = self.grpkey.gg * key.alpha
+            # ff0 = gg*alpha+ZZ0*s0
+            ff0 = ggalpha + (self.grpkey.ZZ0 * s0)
+            # ff1 = gg*alpha+ZZ1*s1
+            ff1 = ggalpha + (self.grpkey.ZZ1 * s1)
 
             # tau = e(f,gg)
             # tau = GT.pairing(f, self.grpkey.gg)
@@ -221,8 +219,8 @@ class Klap20(SchemeInterface):
                 (0, 2),  # alpha, gg
                 (1, 3),  # s0, ZZ0
                 (0, 2),  # alpha, gg
-                (2, 4),
-            ]  # s1, ZZ1
+                (2, 4),  # s1, ZZ1
+            ]
             prods = [1, 1, 1, 1, 2, 2]
             pic, pis = spk.sign(y, g, x, i, prods, n.to_bytes())
             ## Need to send (n, f, w, SS0, SS1, ff0, ff1, pi): prepare ad hoc message
@@ -239,7 +237,7 @@ class Klap20(SchemeInterface):
         elif phase == 3:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
                 return ret
             # Min = v
             key.v = G1.from_b64(message["v"])
@@ -247,18 +245,18 @@ class Klap20(SchemeInterface):
             e1 = GT.pairing(key.v, self.grpkey.gg)
             e2 = GT.pairing(key.u, self.grpkey.XX)
             e3 = GT.pairing(key.w, self.grpkey.YY)
-            e2 = e2 * e3
-            if e1 == e2:
+            e4 = e2 * e3
+            if e1 == e4:
                 ret["status"] = "success"
             else:
                 ret["status"] = "fail"
-                ret["message"] = "e1 != e2"
-                logging.error(ret["message"])
+                ret["message"] = "e1 != e4"
+                logger.error(ret["message"])
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logging.error(ret["message"])
+            logger.error(ret["message"])
         return ret
 
     def sign(self, message, key):
@@ -291,14 +289,50 @@ class Klap20(SchemeInterface):
             e2 = GT.pairing(sig.uu, self.grpkey.XX)
             # e3 = e(ww,YY)
             e3 = GT.pairing(sig.ww, self.grpkey.YY)
-            e2 = e2 * e3
+            e4 = e2 * e3
             ## Compare the result with the received challenge
-            if e1 == e2:
+            if e1 == e4:
                 ret["status"] = "success"
             else:
-                ret["message"] = "e1 != e2"
-                logging.error(ret["message"])
+                ret["message"] = "e1 != e4"
+                logger.error(ret["message"])
         else:
             ret["message"] = "spk.dlog_G1_verify failed"
-            logging.error(ret["message"])
+            logger.error(ret["message"])
+        return ret
+
+    def open(self, signature):
+        ret = {"status": "fail"}
+        sig = Signature.from_b64(signature)
+        b = random.randint(0, 1)
+        for mem_id, (SS0, SS1, ff0, ff1, tau) in self.gml.items():
+            if b:
+                ff = ff1 + -(SS1 * self.mgrkey.z1)
+            else:
+                ff = ff0 + -(SS0 * self.mgrkey.z0)
+            e1 = GT.pairing(sig.uu, ff)
+            e2 = GT.pairing(sig.ww, self.grpkey.gg)
+            e3 = GT.pairing(self.grpkey.g, ff)
+            if e1 == e2 and tau == e3:
+                ret["status"] = "success"
+                ret["id"] = mem_id
+                pic, pis = spk.sign1(
+                    ff, sig.uu, self.grpkey.g, e2, e3, sig.to_b64()
+                )
+                ret["proof"] = {
+                    "pic": pic.to_b64(),
+                    "pis": pis.to_b64(),
+                    "tau": tau.to_b64(),
+                }
+        return ret
+
+    def open_verify(self, signature, proof):
+        ret = {"status": "fail"}
+        sig = Signature.from_b64(signature)
+        pic = Fr.from_b64(proof["pic"])
+        pis = G2.from_b64(proof["pis"])
+        tau = GT.from_b64(proof["tau"])
+        e2 = GT.pairing(sig.ww, self.grpkey.gg)
+        if spk.verify1(pic, pis, sig.uu, self.grpkey.g, e2, tau, sig.to_b64()):
+            ret["status"] = "success"
         return ret

@@ -2,13 +2,15 @@ import hashlib
 import logging
 
 import pygroupsig.spk as spk
-from pygroupsig.baseclasses import B64Mixin, InfoMixin
+from pygroupsig.helpers import B64Mixin, InfoMixin, ReprMixin
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
 from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
 _NAME = "ps16"
 _SEQ = 3
 _START = 0
+
+logger = logging.getLogger(__name__)
 
 
 class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
@@ -22,7 +24,7 @@ class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
         self.Y = G2()  # gg^y (y is part of mgrkey)
 
 
-class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
+class ManagerKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "manager"
 
@@ -31,7 +33,7 @@ class ManagerKey(B64Mixin, InfoMixin, ContainerInterface):
         self.y = Fr()
 
 
-class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
+class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "member"
 
@@ -41,7 +43,7 @@ class MemberKey(B64Mixin, InfoMixin, ContainerInterface):
         self.sigma2 = G1()
 
 
-class Signature(B64Mixin, InfoMixin, ContainerInterface):
+class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "signature"
 
@@ -52,7 +54,7 @@ class Signature(B64Mixin, InfoMixin, ContainerInterface):
         self.s = Fr()
 
 
-class Ps16(SchemeInterface):
+class PS16(ReprMixin, SchemeInterface):
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
@@ -72,15 +74,15 @@ class Ps16(SchemeInterface):
     def join_mgr(self, phase, message=None):
         ret = {"status": "error"}
         if phase == 0:
-            ## Send a random element to the member
+            ## Send a random element to the member, the member should send it back
+            ## to us. This way replay attacks are mitigated
             n = G1.from_random()
             ret["status"] = "success"
             ret["n"] = n.to_b64()
-            ## TODO: This value should be saved in some place to avoid replay attack
         elif phase == 2:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
                 return ret
             ## Import the (n,tau,ttau,pi) ad hoc message
             n = G1.from_b64(message["n"])
@@ -97,17 +99,15 @@ class Ps16(SchemeInterface):
                     ## Compute the partial member key
                     u = Fr.from_random()
                     sigma1 = self.grpkey.g * u
-                    aux = tau * self.mgrkey.y
-                    sigma2 = self.grpkey.g * self.mgrkey.x
-                    sigma2 = aux + sigma2
-                    sigma2 = sigma2 * u
+                    sigma2 = (
+                        (tau * self.mgrkey.y) + (self.grpkey.g * self.mgrkey.x)
+                    ) * u
 
                     ## Add the tuple (i,tau,ttau) to the GML
                     h = hashlib.sha256()
                     h.update(tau.to_bytes())
                     h.update(ttau.to_bytes())
-                    mem_id = h.hexdigest()
-                    self.gml[mem_id] = (tau, ttau)
+                    self.gml[h.hexdigest()] = (tau, ttau)
 
                     ## Mout = (sigma1,sigma2)
                     ret["status"] = "success"
@@ -116,16 +116,16 @@ class Ps16(SchemeInterface):
                 else:
                     ret["status"] = "fail"
                     ret["message"] = "e1 != e2"
-                    logging.error(ret["message"])
+                    logger.error(ret["message"])
             else:
                 ret["status"] = "fail"
                 ret["message"] = "spk.dlog_G1_verify failed"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logging.error(ret["message"])
+            logger.error(ret["message"])
         return ret
 
     def join_mem(self, phase, message, key):
@@ -154,7 +154,7 @@ class Ps16(SchemeInterface):
         elif phase == 3:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logging.error(ret["message"])
+                logger.error(ret["message"])
                 return ret
             ## Check correctness of computation and update memkey
 
@@ -168,7 +168,7 @@ class Ps16(SchemeInterface):
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logging.error(ret["message"])
+            logger.error(ret["message"])
         return ret
 
     def sign(self, message, key):
@@ -186,8 +186,7 @@ class Ps16(SchemeInterface):
         # A good improvement would be to analyze how to generalize spk_dlog
         # to fit this
         k = Fr.from_random()
-        e = GT.pairing(sig.sigma1, self.grpkey.Y)
-        e = e**k
+        e = (GT.pairing(sig.sigma1, self.grpkey.Y)) ** k
 
         # c = hash(ps16_sig->sigma1,ps16_sig->sigma2,e,m)
         h = hashlib.sha256()
@@ -198,8 +197,7 @@ class Ps16(SchemeInterface):
 
         ## Complete the sig
         sig.c.set_hash(h.digest())
-        sig.s.set_object(sig.c * key.sk)
-        sig.s.set_object(k + sig.s)
+        sig.s.set_object(k + (sig.c * key.sk))
         return {
             "status": "success",
             "signature": sig.to_b64(),
@@ -210,27 +208,20 @@ class Ps16(SchemeInterface):
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
 
-        # e1 = e(sigma1^-1,X)
-        aux_G1 = -sig.sigma1
-        e1 = GT.pairing(aux_G1, self.grpkey.X)
-
+        # e1 = e(-sigma1,X)
+        e1 = GT.pairing(-sig.sigma1, self.grpkey.X)
         # e2 = e(sigma2,gg)
         e2 = GT.pairing(sig.sigma2, self.grpkey.gg)
+        # e3 = e(sigma1*s,Y)
+        e3 = GT.pairing(sig.sigma1 * sig.s, self.grpkey.Y)
 
-        # e3 = e(sigma1^s,Y)
-        aux_G1 = sig.sigma1 * sig.s
-        e3 = GT.pairing(aux_G1, self.grpkey.Y)
-
-        # R = (e1*e2)^-c*e3
-        e1 = e1 * e2
-        e1 = e1**sig.c
-        e1 = ~e1
-        e1 = e1 * e3
+        # R = ((e1*e2)**-c)*e3
+        R = ~((e1 * e2) ** sig.c) * e3
 
         h = hashlib.sha256()
         h.update(sig.sigma1.to_bytes())
         h.update(sig.sigma2.to_bytes())
-        h.update(e1.to_bytes())
+        h.update(R.to_bytes())
         h.update(message.encode())
 
         ## Complete the sig
@@ -241,5 +232,37 @@ class Ps16(SchemeInterface):
             ret["status"] = "success"
         else:
             ret["message"] = "sig.c != c"
-            logging.error(ret["message"])
+            logger.error(ret["message"])
+        return ret
+
+    def open(self, signature):
+        ret = {"status": "fail"}
+        sig = Signature.from_b64(signature)
+        e1 = GT.pairing(sig.sigma2, self.grpkey.gg)
+        e2 = GT.pairing(sig.sigma1, self.grpkey.X)
+        e4 = e1 / e2
+        for mem_id, (tau, ttau) in self.gml.items():
+            e3 = GT.pairing(sig.sigma1, ttau)
+            if e4 == e3:
+                ret["status"] = "success"
+                ret["id"] = mem_id
+                pic, pis = spk.pairing_homomorphism_G2_sign(
+                    sig.sigma1, e3, ttau, sig.to_b64()
+                )
+                ret["proof"] = {"pic": pic.to_b64(), "pis": pis.to_b64()}
+                break
+        return ret
+
+    def open_verify(self, signature, proof):
+        ret = {"status": "fail"}
+        sig = Signature.from_b64(signature)
+        pic = Fr.from_b64(proof["pic"])
+        pis = G2.from_b64(proof["pis"])
+        e1 = GT.pairing(sig.sigma2, self.grpkey.gg)
+        e2 = GT.pairing(sig.sigma1, self.grpkey.X)
+        e4 = e1 / e2
+        if spk.pairing_homomorphism_G2_verify(
+            sig.sigma1, e4, pic, pis, sig.to_b64()
+        ):
+            ret["status"] = "success"
         return ret
