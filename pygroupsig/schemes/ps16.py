@@ -2,7 +2,7 @@ import hashlib
 import logging
 
 import pygroupsig.spk as spk
-from pygroupsig.helpers import B64Mixin, InfoMixin, ReprMixin
+from pygroupsig.helpers import GML, B64Mixin, InfoMixin, ReprMixin
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
 from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
@@ -13,7 +13,7 @@ _START = 0
 logger = logging.getLogger(__name__)
 
 
-class GroupKey(B64Mixin, InfoMixin, ContainerInterface):
+class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "group"
 
@@ -58,7 +58,7 @@ class PS16(ReprMixin, SchemeInterface):
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
-        self.gml = {}
+        self.gml = GML()
 
     def setup(self):
         ## Set manager key
@@ -71,65 +71,77 @@ class PS16(ReprMixin, SchemeInterface):
         self.grpkey.X.set_object(self.grpkey.gg * self.mgrkey.x)
         self.grpkey.Y.set_object(self.grpkey.gg * self.mgrkey.y)
 
-    def join_mgr(self, phase, message=None):
+    def join_mgr(self, message=None):
         ret = {"status": "error"}
-        if phase == 0:
+        if message is None:
             ## Send a random element to the member, the member should send it back
             ## to us. This way replay attacks are mitigated
             n = G1.from_random()
             ret["status"] = "success"
             ret["n"] = n.to_b64()
-        elif phase == 2:
+            ret["phase"] = 1
+        else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
                 logger.error(ret["message"])
                 return ret
-            ## Import the (n,tau,ttau,pi) ad hoc message
-            n = G1.from_b64(message["n"])
-            tau = G1.from_b64(message["tau"])
-            ttau = G2.from_b64(message["ttau"])
-            pic = Fr.from_b64(message["pic"])
-            pis = Fr.from_b64(message["pis"])
+            phase = message["phase"]
+            if phase == 2:
+                ## Import the (n,tau,ttau,pi) ad hoc message
+                n = G1.from_b64(message["n"])
+                tau = G1.from_b64(message["tau"])
+                ttau = G2.from_b64(message["ttau"])
+                pic = Fr.from_b64(message["pic"])
+                pis = Fr.from_b64(message["pis"])
 
-            if spk.dlog_G1_verify(tau, self.grpkey.g, pic, pis, n.to_bytes()):
-                e1 = GT.pairing(tau, self.grpkey.Y)
-                e2 = GT.pairing(self.grpkey.g, ttau)
+                if spk.dlog_G1_verify(
+                    tau, self.grpkey.g, pic, pis, n.to_bytes()
+                ):
+                    e1 = GT.pairing(tau, self.grpkey.Y)
+                    e2 = GT.pairing(self.grpkey.g, ttau)
 
-                if e1 == e2:
-                    ## Compute the partial member key
-                    u = Fr.from_random()
-                    sigma1 = self.grpkey.g * u
-                    sigma2 = (
-                        (tau * self.mgrkey.y) + (self.grpkey.g * self.mgrkey.x)
-                    ) * u
+                    if e1 == e2:
+                        ## Compute the partial member key
+                        u = Fr.from_random()
+                        sigma1 = self.grpkey.g * u
+                        sigma2 = (
+                            (tau * self.mgrkey.y)
+                            + (self.grpkey.g * self.mgrkey.x)
+                        ) * u
 
-                    ## Add the tuple (i,tau,ttau) to the GML
-                    h = hashlib.sha256()
-                    h.update(tau.to_bytes())
-                    h.update(ttau.to_bytes())
-                    self.gml[h.hexdigest()] = (tau, ttau)
+                        ## Add the tuple (i,tau,ttau) to the GML
+                        h = hashlib.sha256()
+                        h.update(tau.to_bytes())
+                        h.update(ttau.to_bytes())
+                        self.gml[h.hexdigest()] = (tau, ttau)
 
-                    ## Mout = (sigma1,sigma2)
-                    ret["status"] = "success"
-                    ret["sigma1"] = sigma1.to_b64()
-                    ret["sigma2"] = sigma2.to_b64()
+                        ## Mout = (sigma1,sigma2)
+                        ret["status"] = "success"
+                        ret["sigma1"] = sigma1.to_b64()
+                        ret["sigma2"] = sigma2.to_b64()
+                        ret["phase"] = phase + 1
+                    else:
+                        ret["status"] = "fail"
+                        ret["message"] = "e1 != e2"
+                        logger.error(ret["message"])
                 else:
                     ret["status"] = "fail"
-                    ret["message"] = "e1 != e2"
+                    ret["message"] = "spk.dlog_G1_verify failed"
                     logger.error(ret["message"])
             else:
-                ret["status"] = "fail"
-                ret["message"] = "spk.dlog_G1_verify failed"
+                ret["message"] = (
+                    f"Phase not supported for {self.__class__.__name__}"
+                )
                 logger.error(ret["message"])
-        else:
-            ret["message"] = (
-                f"Phase not supported for {self.__class__.__name__}"
-            )
-            logger.error(ret["message"])
         return ret
 
-    def join_mem(self, phase, message, key):
+    def join_mem(self, message, key):
         ret = {"status": "error"}
+        if not isinstance(message, dict):
+            ret["message"] = "Invalid message type. Expected dict"
+            logger.error(ret["message"])
+            return ret
+        phase = message["phase"]
         if phase == 1:
             ## The manager sends a random element in G1
             n = G1.from_b64(message["n"])
@@ -151,6 +163,7 @@ class PS16(ReprMixin, SchemeInterface):
             ret["ttau"] = ttau.to_b64()
             ret["pic"] = pic.to_b64()
             ret["pis"] = pis.to_b64()
+            ret["phase"] = phase + 1
         elif phase == 3:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
@@ -241,7 +254,7 @@ class PS16(ReprMixin, SchemeInterface):
         e1 = GT.pairing(sig.sigma2, self.grpkey.gg)
         e2 = GT.pairing(sig.sigma1, self.grpkey.X)
         e4 = e1 / e2
-        for mem_id, (tau, ttau) in self.gml.items():
+        for mem_id, (_, ttau) in self.gml.items():
             e3 = GT.pairing(sig.sigma1, ttau)
             if e4 == e3:
                 ret["status"] = "success"

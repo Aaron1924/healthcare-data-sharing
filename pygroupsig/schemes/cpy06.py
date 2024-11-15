@@ -3,7 +3,7 @@ import json
 import logging
 
 import pygroupsig.spk as spk
-from pygroupsig.helpers import B64Mixin, InfoMixin, ReprMixin
+from pygroupsig.helpers import CRL, GML, B64Mixin, InfoMixin, ReprMixin
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
 from pygroupsig.pairings.mcl import G1, G2, GT, Fr
 
@@ -80,8 +80,8 @@ class CPY06(ReprMixin, SchemeInterface):
         self.mgrkey = ManagerKey()
         self._g1 = G1.from_generator()
         self._g2 = G2.from_generator()
-        self.gml = {}
-        self.crl = {}
+        self.gml = GML()
+        self.crl = CRL()
 
     def setup(self):
         # \xi_1 \in_R Z^*_p
@@ -118,9 +118,9 @@ class CPY06(ReprMixin, SchemeInterface):
         # e5 = e(q,g2)
         self.grpkey.e5.set_object(GT.pairing(self.grpkey.q, self._g2))
 
-    def join_mgr(self, phase, message=None):
+    def join_mgr(self, message=None):
         ret = {"status": "error"}
-        if phase == 0:
+        if message is None:
             ## Generate random u, v from Z^*_p
             u = Fr.from_random()
             v = Fr.from_random()
@@ -129,60 +129,65 @@ class CPY06(ReprMixin, SchemeInterface):
             ret["status"] = "success"
             ret["u"] = u.to_b64()
             ret["v"] = v.to_b64()
-        elif phase == 2:
+            ret["phase"] = 1
+        else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
                 logger.error(ret["message"])
                 return ret
-            ## Input message is <I,pi,spk>
-            _I = G1.from_b64(message["I"])
-            pi = G1.from_b64(message["pi"])
-            pic = Fr.from_b64(message["pic"])
-            pis = [Fr.from_b64(el) for el in json.loads(message["pis"])]
-            Y = [pi, pi]
-            G = [self._g1, _I, self.grpkey.q]
-            i = [
-                (0, 0),  # x*g1 (g[0],x[0])
-                (1, 0),  # v*g1 (g[0],x[1])
-                (2, 1),  # u*I (g[1],x[2])
-                (3, 2),  # rr*q (g[2],x[3])
-            ]
-            prods = [1, 3]
+            phase = message["phase"]
+            if phase == 2:
+                ## Input message is <I,pi,spk>
+                _I = G1.from_b64(message["I"])
+                pi = G1.from_b64(message["pi"])
+                pic = Fr.from_b64(message["pic"])
+                pis = [Fr.from_b64(el) for el in json.loads(message["pis"])]
+                Y = [pi, pi]
+                G = [self._g1, _I, self.grpkey.q]
+                i = [
+                    (0, 0),  # x*g1 (g[0],x[0])
+                    (1, 0),  # v*g1 (g[0],x[1])
+                    (2, 1),  # u*I (g[1],x[2])
+                    (3, 2),  # rr*q (g[2],x[3])
+                ]
+                prods = [1, 3]
 
-            if spk.rep_verify(Y, G, i, prods, pic, pis, pi.to_bytes()):
-                # t \in_R Z^*_p
-                t = Fr.from_random()
-                # A = (pi+q) * ((gamma+t)**-1)
-                A = (pi + self.grpkey.q) * ~(self.mgrkey.gamma + t)
+                if spk.rep_verify(Y, G, i, prods, pic, pis, pi.to_bytes()):
+                    # t \in_R Z^*_p
+                    t = Fr.from_random()
+                    # A = (pi+q) * ((gamma+t)**-1)
+                    A = (pi + self.grpkey.q) * ~(self.mgrkey.gamma + t)
 
-                ## Update the gml
-                h = hashlib.sha256()
-                h.update(A.to_bytes())
-                h.update(pi.to_bytes())
-                self.gml[h.hexdigest()] = (A, pi)
+                    ## Update the gml
+                    h = hashlib.sha256()
+                    h.update(A.to_bytes())
+                    h.update(pi.to_bytes())
+                    self.gml[h.hexdigest()] = (A, pi)
 
-                ## Write the partial memkey into mout
-                ret["status"] = "success"
-                ret["t"] = t.to_b64()
-                ret["A"] = A.to_b64()
+                    ## Write the partial memkey into mout
+                    ret["status"] = "success"
+                    ret["t"] = t.to_b64()
+                    ret["A"] = A.to_b64()
+                    ret["phase"] = phase + 1
+                else:
+                    ret["status"] = "fail"
+                    ret["message"] = "spk.rep_verify failed"
+                    logger.error(ret["message"])
             else:
-                ret["status"] = "fail"
-                ret["message"] = "spk.rep_verify failed"
+                ret["message"] = (
+                    f"Phase not supported for {self.__class__.__name__}"
+                )
                 logger.error(ret["message"])
-        else:
-            ret["message"] = (
-                f"Phase not supported for {self.__class__.__name__}"
-            )
-            logger.error(ret["message"])
         return ret
 
-    def join_mem(self, phase, message, key):
+    def join_mem(self, message, key):
         ret = {"status": "error"}
+        if not isinstance(message, dict):
+            ret["message"] = "Invalid message type. Expected dict"
+            logger.error(ret["message"])
+            return ret
+        phase = message["phase"]
         if phase == 1:
-            if not isinstance(message, dict):
-                ret["message"] = "Invalid message type. Expected dict"
-                logger.error(ret["message"])
-                return ret
             ## Read u and v from input message
             u = Fr.from_b64(message["u"])
             v = Fr.from_b64(message["v"])
@@ -228,6 +233,7 @@ class CPY06(ReprMixin, SchemeInterface):
             ret["pi"] = pi.to_b64()
             ret["pic"] = pic.to_b64()
             ret["pis"] = json.dumps([p.to_b64() for p in pis])
+            ret["phase"] = phase + 1
         elif phase == 3:
             ## Import partial key from message
             _t = Fr.from_b64(message["t"])
@@ -416,10 +422,11 @@ class CPY06(ReprMixin, SchemeInterface):
         A = G1.muln(e, s)
         # A = T3-A
         A = sig.T3 - A
-        for mem_id, (_A, pi) in self.gml.items():
-            if A == _A:
+        for mem_id, (open_trap, _) in self.gml.items():
+            if A == open_trap:
                 ret["status"] = "success"
                 ret["id"] = mem_id
+                break
         return ret
 
     def reveal(self, mem_id):
@@ -427,20 +434,89 @@ class CPY06(ReprMixin, SchemeInterface):
         if mem_id in self.gml:
             ret["status"] = "success"
             self.crl[mem_id] = self.gml[mem_id]
-            print(self.crl)
         return ret
 
     def trace(self, signature):
-        raise NotImplementedError("Function not implemented yet")
+        ret = {"status": "success", "revoked": False}
+        sig = Signature.from_b64(signature)
+        for _, (_, trace_trap) in self.crl.items():
+            ret["revoked"] = False
+            e = GT.pairing(trace_trap, sig.T4)
+            if e == sig.T5:
+                ret["status"] = "success"
+                ret["revoked"] = True
+                break
+        return ret
 
-    def claim(self, signature):
-        raise NotImplementedError("Function not implemented yet")
+    def prove_equality(self, signatures, key):
+        ## Initialize the hashing environment
+        h = hashlib.sha256()
+        ## Get random r
+        r = Fr.from_random()
+        ## To create the proof, we make use of the T4 and T5 objects of the signatures.
+        ## The knowledge of the discrete logarithm of T5 to the base e(g1,T4) is used in
+        ## normal signature claims. In the same way, given two signatures (allegedly)
+        ## issued by the same member, with corresponding objects T4, T5, T4' and T5', we
+        ## prove here that the discrete logarithm of T5 to the base e(g1,T4) is the same
+        ## to that of T5' to the base e(g1,T4')
 
-    def claim_verify(self, signature):
-        raise NotImplementedError("Function not implemented yet")
+        ## (1) Raise e(g1,T4) of each received signature to r, and put it into the hash
+        for s in signatures:
+            sig = Signature.from_b64(s)
+            e = GT.pairing(self._g1, sig.T4)
+            er = e**r
+            ## Put the i-th e(g1,T4)^r element of the array
+            h.update(er.to_bytes())
+            ## Put the also the base ( = e(g1,T4) ) into the hash
+            h.update(e.to_bytes())
+            ## ... and T5
+            h.update(sig.T5.to_bytes())
+        ## (2) Calculate c = hash((e(g1,T4)^r)[1] || (e(g1,T4))[1] || ... ||
+        ## (e(g1,T4)^r)[n] || (e(g1,T4))[n] )
+        c = Fr.from_hash(h.digest())
+        ## (3) To end, get s = r - c*x
+        s = r + (c * key.x)
+        return {
+            "status": "success",
+            "proof": {"pic": c.to_b64(), "pis": s.to_b64()},
+        }
 
-    def prove_equality(self, signature):
-        raise NotImplementedError("Function not implemented yet")
+    def prove_equality_verify(self, signatures, proof):
+        ret = {"status": "fail"}
+        ## Initialize the hashing environment
+        h = hashlib.sha256()
+        ## We have to recover the e(g1,T4)^r objects. To do so,
+        ## we divide e(g1,T4)^s/T5^c
+        pic = Fr.from_b64(proof["pic"])
+        pis = Fr.from_b64(proof["pis"])
+        for s in signatures:
+            sig = Signature.from_b64(s)
+            e = GT.pairing(self._g1, sig.T4)
+            es = (e**pis) / (sig.T5**pic)
+            ## Put the i-th element of the array
+            h.update(es.to_bytes())
+            ## Put also the base (the e(g1,T4)'s) into the hash
+            h.update(e.to_bytes())
+            ## ... and T5
+            h.update(sig.T5.to_bytes())
 
-    def prove_equality_verify(self, signature):
-        raise NotImplementedError("Function not implemented yet")
+        ## (2) Calculate c = hash((e(g1,T4)^r)[1] || (e(g1,T4))[1] || ... ||
+        ## (e(g1,T4)^r)[n] || (e(g1,T4))[n] )
+        ## Now, we have to get c as an element
+        c = Fr.from_hash(h.digest())
+        if c == pic:
+            ret["status"] = "success"
+        else:
+            ret["message"] = "e != pic"
+            logger.error(ret["message"])
+        return ret
+
+    def claim(self, signature, key):
+        ## A claim is just similar to proving "equality" of N sigature, but just
+        ## for 1 signature
+        return self.prove_equality([signature], key)
+
+    def claim_verify(self, signature, proof):
+        ## A claim is just similar to proving "equality" of N sigature, but just
+        ## for 1 signature
+        return self.prove_equality_verify([signature], proof)

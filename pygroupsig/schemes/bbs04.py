@@ -1,7 +1,7 @@
 import hashlib
 import logging
 
-from pygroupsig.helpers import B64Mixin, InfoMixin, ReprMixin
+from pygroupsig.helpers import GML, B64Mixin, InfoMixin, ReprMixin
 from pygroupsig.interfaces import (
     ContainerInterface,
     SchemeInterface,
@@ -52,7 +52,7 @@ class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.Ag2 = GT()  # Optimizations, e(sigma1,grpkey->Y)
 
 
-class Signature(B64Mixin, InfoMixin, ContainerInterface):
+class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "signature"
 
@@ -72,7 +72,7 @@ class BBS04(ReprMixin, SchemeInterface):
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
-        self.gml = {}
+        self.gml = GML()
 
     def setup(self):
         ## Select random generator g2 in G2. Since G2 is a cyclic multiplicative group
@@ -112,9 +112,9 @@ class BBS04(ReprMixin, SchemeInterface):
         # g1g2 = e(g2, g2)
         self.grpkey.g1g2.set_object(GT.pairing(self.grpkey.g1, self.grpkey.g2))
 
-    def join_mgr(self, phase, message=None):
+    def join_mgr(self, message=None):
         ret = {"status": "error"}
-        if phase == 0:
+        if message is None:
             ## x \in_R Z_p^*
             x = Fr.from_random()
 
@@ -133,6 +133,7 @@ class BBS04(ReprMixin, SchemeInterface):
             ret["x"] = x.to_b64()
             ret["A"] = A.to_b64()
             ret["Ag2"] = Ag2.to_b64()
+            ret["phase"] = 1
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
@@ -140,8 +141,13 @@ class BBS04(ReprMixin, SchemeInterface):
             logger.error(ret["message"])
         return ret
 
-    def join_mem(self, phase, message, key):
+    def join_mem(self, message, key):
         ret = {"status": "error"}
+        if not isinstance(message, dict):
+            ret["message"] = "Invalid message type. Expected dict"
+            logger.error(ret["message"])
+            return ret
+        phase = message["phase"]
         if phase == 1:
             ## Import the primitives sent by the manager
             key.x.set_b64(message["x"])

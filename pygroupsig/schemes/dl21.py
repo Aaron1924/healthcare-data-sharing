@@ -80,54 +80,65 @@ class DL21(ReprMixin, SchemeInterface):
         ## Set the Issuer public key
         self.grpkey.ipk.set_object(self.grpkey.g2 * self.mgrkey.isk)
 
-    def join_mgr(self, phase, message=None):
+    def join_mgr(self, message=None):
         ret = {"status": "error"}
-        if phase == 0:
+        if message is None:
             ## Send a random element to the member
             n = G1.from_random()
             ret["status"] = "success"
             ret["n"] = n.to_b64()
+            ret["phase"] = 1
             ## TODO: This value should be saved in some place to avoid replay attack
-        elif phase == 2:
+        else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
                 logger.error(ret["message"])
                 return ret
-            ## Second step by manager: compute credential from H and pi_H */
-            ## Verify the proof
-            n = G1.from_b64(message["n"])
-            H = G1.from_b64(message["H"])
-            pic = Fr.from_b64(message["pic"])
-            pis = Fr.from_b64(message["pis"])
-            if spk.dlog_G1_verify(H, self.grpkey.h1, pic, pis, n.to_bytes()):
-                ## Pick x and s at random from Z*_p
-                x = Fr.from_random()
-                s = Fr.from_random()
+            phase = message["phase"]
+            if phase == 2:
+                ## Second step by manager: compute credential from H and pi_H */
+                ## Verify the proof
+                n = G1.from_b64(message["n"])
+                H = G1.from_b64(message["H"])
+                pic = Fr.from_b64(message["pic"])
+                pis = Fr.from_b64(message["pis"])
+                if spk.dlog_G1_verify(
+                    H, self.grpkey.h1, pic, pis, n.to_bytes()
+                ):
+                    ## Pick x and s at random from Z*_p
+                    x = Fr.from_random()
+                    s = Fr.from_random()
 
-                # Set A = (H+h_2*s+g_1)*((isk+x)**-1)
-                A = (H + (self.grpkey.h2 * s) + self.grpkey.g1) * ~(
-                    self.mgrkey.isk + x
-                )
+                    # Set A = (H+h_2*s+g_1)*((isk+x)**-1)
+                    A = (H + (self.grpkey.h2 * s) + self.grpkey.g1) * ~(
+                        self.mgrkey.isk + x
+                    )
 
-                ## Mout = (A,x,s)
-                ## This is stored in a partially filled memkey, byte encoded into a
-                ## message_t struct
-                ret["status"] = "success"
-                ret["x"] = x.to_b64()
-                ret["s"] = s.to_b64()
-                ret["A"] = A.to_b64()
+                    ## Mout = (A,x,s)
+                    ## This is stored in a partially filled memkey, byte encoded into a
+                    ## message_t struct
+                    ret["status"] = "success"
+                    ret["x"] = x.to_b64()
+                    ret["s"] = s.to_b64()
+                    ret["A"] = A.to_b64()
+                    ret["phase"] = phase + 1
+                else:
+                    ret["message"] = "spk.dlog_G1_verify failed"
+                    logger.error(ret["message"])
             else:
-                ret["message"] = "spk.dlog_G1_verify failed"
+                ret["message"] = (
+                    f"Phase not supported for {self.__class__.__name__}"
+                )
                 logger.error(ret["message"])
-        else:
-            ret["message"] = (
-                f"Phase not supported for {self.__class__.__name__}"
-            )
-            logger.error(ret["message"])
         return ret
 
-    def join_mem(self, phase, message, key):
+    def join_mem(self, message, key):
         ret = {"status": "error"}
+        if not isinstance(message, dict):
+            ret["message"] = "Invalid message type. Expected dict"
+            logger.error(ret["message"])
+            return ret
+        phase = message["phase"]
         if phase == 1:
             ## First step by the member: parse n and compute (Y,\pi_Y)
             n = G1.from_b64(message["n"])
@@ -149,11 +160,8 @@ class DL21(ReprMixin, SchemeInterface):
             ret["H"] = key.H.to_b64()
             ret["pic"] = pic.to_b64()
             ret["pis"] = pis.to_b64()
+            ret["phase"] = phase + 1
         elif phase == 3:
-            if not isinstance(message, dict):
-                ret["message"] = "Invalid message type. Expected dict"
-                logger.error(ret["message"])
-                return ret
             ## Second step by the member: Check correctness of computation
             ## and update memkey
             key.x.set_b64(message["x"])

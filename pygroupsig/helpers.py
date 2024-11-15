@@ -1,3 +1,4 @@
+import importlib
 import json
 from base64 import b64decode, b64encode
 
@@ -35,7 +36,11 @@ class B64Mixin:
         return b64encode(json.dumps(msg).encode()).decode()
 
     def set_b64(self, s):
-        data = json.loads(b64decode(s.encode()))
+        if isinstance(s, str):
+            s = s.encode()
+        elif not isinstance(s, bytes):
+            raise TypeError(f"Invalid {s} type. Expected str/bytes")
+        data = json.loads(b64decode(s))
         if "key" in data or "signature" in data:
             if "key" in data:
                 d = data["key"]
@@ -60,19 +65,44 @@ class B64Mixin:
         return ret
 
 
-class OpenMixin: ...
+class InfoLMixin:
+    def info(self):
+        return self._NAME, self._CTYPE
 
 
-class OVerifyMixin: ...
+class ContainerDict(dict):
+    def to_b64(self):
+        exp = {}
+        for el, values in self.items():
+            exp[el] = [
+                f"{v.__class__.__module__}.{v.__class__.__name__}|{v.to_b64()}"
+                for v in values
+            ]
+        return b64encode(json.dumps(exp).encode())
+
+    def set_b64(self, s):
+        if isinstance(s, str):
+            s = s.encode()
+        elif not isinstance(s, bytes):
+            raise TypeError(f"Invalid {s} type. Expected str/bytes")
+        imp = json.loads(b64decode(s))
+        for mem_id, data in imp.items():
+            values = []
+            for el in data:
+                _c, _v = el.split("|")
+                path = _c.split(".")
+                module_name, class_name = ".".join(path[:-1]), path[-1]
+                mod = importlib.import_module(module_name)
+                cls = getattr(mod, class_name)
+                values.append(cls.from_b64(_v))
+            self[mem_id] = tuple(values)
+
+    @classmethod
+    def from_b64(cls, s):
+        ret = cls()
+        ret.set_b64(s)
+        return ret
 
 
-class RevealTraceClaimCVerifyProveEqPEqVerifyMixin: ...
-
-
-class BlindConvertUnblindMixin: ...
-
-
-class IdentifyLinkLVerifyMixin: ...
-
-
-class SeqlinkSVerifyMixin: ...
+GML = ContainerDict
+CRL = ContainerDict

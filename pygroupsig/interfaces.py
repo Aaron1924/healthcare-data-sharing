@@ -10,7 +10,7 @@ class SchemeInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
-    def join_mem(self, phase, message=None):
+    def join_mem(self, message=None):
         """
         Functions of this type are executed by entities who want to be
         included in a group. They run in coordination with the equivalent
@@ -18,7 +18,7 @@ class SchemeInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
-    def join_mgr(self, phase, message=None):
+    def join_mgr(self, message=None):
         """
         Functions of this type are executed by group managers. From a
         partial member key, as produced by the corresponding join_mem
@@ -51,11 +51,3 @@ class ContainerInterface(metaclass=ABCMeta):
         """
         Listing of internal properties
         """
-
-    # @abstractmethod
-    # def from_b64(self):
-    #     ,,,
-
-    # @abstractmethod
-    # def to_string(self):
-    #     ...

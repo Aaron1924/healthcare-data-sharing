@@ -88,7 +88,7 @@ SIGNATURES = {
 }
 
 
-def scheme(name):
+def group(name):
     _name = name.lower()
     if _name in SCHEMES:
         return SCHEMES[_name]()
@@ -131,7 +131,7 @@ def signature(name=None, b64=None):
         ret.set_b64(data["signature"])
         return ret
     elif name is not None:
-        _name = scheme.lower()
+        _name = name.lower()
         if _name in SIGNATURES:
             return SIGNATURES[_name]()
         else:

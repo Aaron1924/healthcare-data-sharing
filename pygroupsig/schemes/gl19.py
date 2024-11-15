@@ -120,63 +120,76 @@ class GL19(ReprMixin, SchemeInterface):
         ## Add the Extractor's public key to the group key
         self.grpkey.epk.set_object(self.grpkey.g * self.mgrkey.esk)
 
-    def join_mgr(self, phase, message=None):
+    def join_mgr(self, message=None):
         ret = {"status": "error"}
-        if phase == 0:
+        if message is None:
             ## Send a random element to the member
             n = G1.from_random()
             ret["status"] = "success"
             ret["n"] = n.to_b64()
+            ret["phase"] = 1
             ## TODO: This value should be saved in some place to avoid replay attack
-        elif phase == 2:
+        else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
                 logger.error(ret["message"])
                 return ret
-            ## Compute credential from H and pi_H. Verify the proof
-            n = G1.from_b64(message["n"])
-            H = G1.from_b64(message["H"])
-            pic = Fr.from_b64(message["pic"])
-            pis = Fr.from_b64(message["pis"])
+            phase = message["phase"]
+            if phase == 2:
+                ## Compute credential from H and pi_H. Verify the proof
+                n = G1.from_b64(message["n"])
+                H = G1.from_b64(message["H"])
+                pic = Fr.from_b64(message["pic"])
+                pis = Fr.from_b64(message["pis"])
 
-            if spk.dlog_G1_verify(H, self.grpkey.h1, pic, pis, n.to_bytes()):
-                ## Pick x and s at random from Z*_p
-                x = Fr.from_random()
-                s = Fr.from_random()
+                if spk.dlog_G1_verify(
+                    H, self.grpkey.h1, pic, pis, n.to_bytes()
+                ):
+                    ## Pick x and s at random from Z*_p
+                    x = Fr.from_random()
+                    s = Fr.from_random()
 
-                life = str(int(time.time() + self.LIFETIME))
-                h = hashlib.sha256(life.encode())
-                ## Modification w.r.t. the GL19 paper: we add a maximum lifetime
-                ## for member credentials. This is done by adding a second message
-                ## to be signed in the BBS+ signatures. This message will then be
-                ## "revealed" (i.e., shared in cleartext) in the SPK computed for
-                ## signing
-                d = Fr.from_hash(h.digest())
+                    life = str(int(time.time() + self.LIFETIME))
+                    h = hashlib.sha256(life.encode())
+                    ## Modification w.r.t. the GL19 paper: we add a maximum lifetime
+                    ## for member credentials. This is done by adding a second message
+                    ## to be signed in the BBS+ signatures. This message will then be
+                    ## "revealed" (i.e., shared in cleartext) in the SPK computed for
+                    ## signing
+                    d = Fr.from_hash(h.digest())
 
-                ## Set A = (H+h_2*s+h3*d+g_1)*((isk+x)**-1)
-                h2s = self.grpkey.h2 * s
-                h3d = self.grpkey.h3 * d
-                A = (H + h2s + h3d + self.grpkey.g1) * ~(self.mgrkey.isk + x)
+                    ## Set A = (H+h_2*s+h3*d+g_1)*((isk+x)**-1)
+                    h2s = self.grpkey.h2 * s
+                    h3d = self.grpkey.h3 * d
+                    A = (H + h2s + h3d + self.grpkey.g1) * ~(
+                        self.mgrkey.isk + x
+                    )
 
-                ## Mout = (A,x,s,l)
-                ret["status"] = "success"
-                ret["A"] = A.to_b64()
-                ret["x"] = x.to_b64()
-                ret["s"] = s.to_b64()
-                ret["l"] = life
+                    ## Mout = (A,x,s,l)
+                    ret["status"] = "success"
+                    ret["A"] = A.to_b64()
+                    ret["x"] = x.to_b64()
+                    ret["s"] = s.to_b64()
+                    ret["l"] = life
+                    ret["phase"] = phase + 1
+                else:
+                    ret["status"] = "fail"
+                    ret["message"] = "spk.dlog_G1_verify failed"
+                    logger.error(ret["message"])
             else:
-                ret["status"] = "fail"
-                ret["message"] = "spk.dlog_G1_verify failed"
+                ret["message"] = (
+                    f"Phase not supported for {self.__class__.__name__}"
+                )
                 logger.error(ret["message"])
-        else:
-            ret["message"] = (
-                f"Phase not supported for {self.__class__.__name__}"
-            )
-            logger.error(ret["message"])
         return ret
 
-    def join_mem(self, phase, message, key):
+    def join_mem(self, message, key):
         ret = {"status": "error"}
+        if not isinstance(message, dict):
+            ret["message"] = "Invalid message type. Expected dict"
+            logger.error(ret["message"])
+            return ret
+        phase = message["phase"]
         if phase == 1:
             ## Parse n and compute (Y,\pi_Y)
             n = G1.from_b64(message["n"])
@@ -198,11 +211,8 @@ class GL19(ReprMixin, SchemeInterface):
             ret["H"] = key.H.to_b64()
             ret["pic"] = pic.to_b64()
             ret["pis"] = pis.to_b64()
+            ret["phase"] = phase + 1
         elif phase == 3:
-            if not isinstance(message, dict):
-                ret["message"] = "Invalid message type. Expected dict"
-                logger.error(ret["message"])
-                return ret
             ## Check correctness of computation and update memkey
 
             # Min = (A,x,s,l)
