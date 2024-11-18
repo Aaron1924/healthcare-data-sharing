@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import random
 import time
 
 import pygroupsig.spk as spk
@@ -57,6 +58,25 @@ class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.h3d = G1()  # Used in signatures. h3d = h3^d
 
 
+class BlindKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "blind"
+
+    def __init__(self):
+        self.pk = G1()  # Public key. Equals g^sk
+        self.sk = Fr()  # Randomly chosen private key
+
+    @classmethod
+    def from_random(cls, grpkey):
+        ret = cls()
+        ret.sk.set_random()
+        ret.pk.set_object(grpkey.g * ret.sk)
+        return ret
+
+    def public(self):
+        return self.pk.to_b64()
+
+
 class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     _NAME = _NAME
     _CTYPE = "signature"
@@ -77,6 +97,18 @@ class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         # process checks that the signature was produced by a
         # signer controlling a credential with the corresponding
         # expiration date
+
+
+class BlindSignature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
+    _NAME = _NAME
+    _CTYPE = "blind_signature"
+
+    def __init__(self):
+        self.nym1 = G1()
+        self.nym2 = G1()
+        self.nym3 = G1()
+        self.c1 = G1()
+        self.c2 = G1()
 
 
 class GL19(ReprMixin, SchemeInterface):
@@ -108,6 +140,8 @@ class GL19(ReprMixin, SchemeInterface):
         ## Add the Issuer's public key to the group key
         self.grpkey.ipk.set_object(self.grpkey.g2 * self.mgrkey.isk)
 
+        ## I'll simplify this scheme, instead of using multiple setup calls,
+        ## the first call will also generate the converter key
         ## Generate the Converter's private key
         self.mgrkey.csk.set_random()
 
@@ -398,3 +432,96 @@ class GL19(ReprMixin, SchemeInterface):
             ret["message"] = "spk.rep_verify failed"
             logger.error(ret["message"])
         return ret
+
+    def blind(self, message, signature, blind_key=None):
+        if blind_key is None:
+            blind_key = BlindKey.from_random(self.grpkey)
+        message = str(message)
+        sig = Signature.from_b64(signature)
+
+        ## Pick alpha, beta, gamma at random from Z^*_p
+        alpha = Fr.from_random()
+        beta = Fr.from_random()
+        gamma = Fr.from_random()
+
+        ## Rerandomize the pseudonym encryption under the cpk and
+        ## add an encryption layer for the pseudonym under the bpk
+        bsig = BlindSignature()
+        bsig.nym1.set_object(sig.nym1 + (self.grpkey.g * beta))
+        bsig.nym2.set_object(self.grpkey.g * alpha)
+        bsig.nym3.set_object(
+            sig.nym2 + (self.grpkey.cpk * beta) + (blind_key.pk * alpha)
+        )
+
+        ##  Encrypt the (hash of the) message
+        h = hashlib.sha256()
+        h.update(message.encode())
+        c = G1.from_hash(h.digest())
+        bsig.c1.set_object(self.grpkey.g * gamma)
+        bsig.c2.set_object(c + (blind_key.pk * gamma))
+        return {
+            "status": "success",
+            "blind_signature": bsig.to_b64(),
+            "blind_key": blind_key.to_b64(),
+        }
+
+    def convert(self, blind_signatures, blind_key_pk):
+        r = Fr.from_random()
+        neg_csk = -self.mgrkey.csk
+        converted_signatures = []
+        pk = G1.from_b64(blind_key_pk)
+        for bsig_b64 in blind_signatures:
+            bsig = BlindSignature.from_b64(bsig_b64)
+            r1 = Fr.from_random()
+            r2 = Fr.from_random()
+            ## Decrypt nym and raise to r
+            cnym1p = bsig.nym2 * r
+            cnym2p = ((bsig.nym1 * neg_csk) + bsig.nym3) * r
+
+            ## Re-randomize nym
+            csig = BlindSignature()
+            csig.nym1.set_object(cnym1p + (self.grpkey.g * r1))
+            csig.nym2.set_object(cnym2p + (pk * r1))
+            ## nym3 is empty (default value 0)
+
+            ## Re-randomize ciphertext
+            csig.c1.set_object(bsig.c1 + (self.grpkey.g * r2))
+            csig.c2.set_object(bsig.c2 + (pk * r2))
+            converted_signatures.append(csig.to_b64())
+        durstenfeld_perm(converted_signatures)
+        return {
+            "status": "success",
+            "converted_signatures": converted_signatures,
+        }
+
+    def unblind(self, converted_signature, blind_key):
+        csig = BlindSignature.from_b64(converted_signature)
+        ## Decrypt the pseudonym with the blinding private key
+        aux_zn = -blind_key.sk
+        _id = (csig.nym1 * aux_zn) + csig.nym2
+
+        ## Decrypt the (hashed) message with the blinding private key
+        aux_G1 = csig.c1 * aux_zn
+        aux_G1 = csig.c2 + aux_G1
+
+        ## Update the received message with the string representation of aux_G1
+        ## Really required? It has no use
+        return {
+            "status": "success",
+            "nym": _id.to_b64(),
+        }
+
+
+def durstenfeld_perm(input_list):
+    """
+    Uses Durstenfeld variant of the Fisher-Yates in place permutation
+    algorithm to output a random permutation of the given array.
+
+    See https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#The_modern_algorithm
+    for a definition of the algorithm.
+    """
+    for i in range(len(input_list) - 2):
+        j = random.randint(i, len(input_list))
+        tmp = input_list[i]
+        input_list[i] = input_list[j]
+        input_list[j] = tmp

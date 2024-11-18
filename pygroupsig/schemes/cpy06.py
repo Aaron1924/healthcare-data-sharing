@@ -437,10 +437,9 @@ class CPY06(ReprMixin, SchemeInterface):
         return ret
 
     def trace(self, signature):
-        ret = {"status": "success", "revoked": False}
+        ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
         for _, (_, trace_trap) in self.crl.items():
-            ret["revoked"] = False
             e = GT.pairing(trace_trap, sig.T4)
             if e == sig.T5:
                 ret["status"] = "success"
@@ -517,6 +516,6 @@ class CPY06(ReprMixin, SchemeInterface):
         return self.prove_equality([signature], key)
 
     def claim_verify(self, signature, proof):
-        ## A claim is just similar to proving "equality" of N sigature, but just
+        ## A claim verification is just similar to proving "equality verification" of N sigature, but just
         ## for 1 signature
         return self.prove_equality_verify([signature], proof)

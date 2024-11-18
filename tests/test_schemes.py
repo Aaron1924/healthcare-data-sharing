@@ -1,105 +1,81 @@
 import unittest
 
-from tests.mixins import (
+from tests.helpers import (
     AddMember2Mixin,
-    TestBaseGMLOps,
-    TestBaseKeyOps,
-    TestBaseOps,
-    TestBaseSignatureOps,
-    TestOpenMixin,
-    TestOpenVerifyMixin,
+    TestAddMember2,
+    TestBase,
+    TestBaseExportImport,
+    TestBlind,
+    TestBlindExportImport,
+    TestOpen,
+    TestOpenVerify,
+    TestReveal,
 )
 
 
-class TestBBS04GroupOps(
-    TestOpenMixin, AddMember2Mixin, TestBaseOps, unittest.TestCase
+class Test_1a_BBS04GroupOps(
+    TestOpen, TestAddMember2, AddMember2Mixin, TestBase, unittest.TestCase
 ):
     scheme = "bbs04"
 
 
-class TestBBS04KeyOps(AddMember2Mixin, TestBaseKeyOps, unittest.TestCase):
-    scheme = "bbs04"
-
-
-class TestBBS04SignatureOps(
-    AddMember2Mixin, TestBaseSignatureOps, unittest.TestCase
+class Test_1b_BBS04ExportImportOps(
+    AddMember2Mixin, TestBaseExportImport, unittest.TestCase
 ):
     scheme = "bbs04"
 
 
-class TestBBS04GMLOps(AddMember2Mixin, TestBaseGMLOps, unittest.TestCase):
-    scheme = "bbs04"
-
-
-class TestPS16GroupOps(TestOpenVerifyMixin, TestBaseOps, unittest.TestCase):
+class Test_2a_PS16GroupOps(
+    TestOpenVerify, TestOpen, TestBase, unittest.TestCase
+):
     scheme = "ps16"
 
 
-class TestPS16KeyOps(TestBaseKeyOps, unittest.TestCase):
+class Test_2b_PS16ExportImportOps(TestBaseExportImport, unittest.TestCase):
     scheme = "ps16"
 
 
-class TestPS16SignatureOps(TestBaseSignatureOps, unittest.TestCase):
-    scheme = "ps16"
-
-
-class TestPS16GMLOps(TestBaseGMLOps, unittest.TestCase):
-    scheme = "ps16"
-
-
-class TestCPY06GroupOps(TestOpenMixin, TestBaseOps, unittest.TestCase):
+class Test_3a_CPY06GroupOps(TestOpen, TestBase, unittest.TestCase):
     scheme = "cpy06"
 
 
-class TestCPY06KeyOps(TestBaseKeyOps, unittest.TestCase):
+class Test_3b_CPY06RevealOps(TestReveal, unittest.TestCase):
     scheme = "cpy06"
 
 
-class TestCPY06SignatureOps(TestBaseSignatureOps, unittest.TestCase):
+class Test_3c_CPY06ExportImportOps(TestBaseExportImport, unittest.TestCase):
     scheme = "cpy06"
 
 
-class TestCPY06GMLOps(TestBaseGMLOps, unittest.TestCase):
-    scheme = "cpy06"
-
-
-class TestKLAP20GroupOps(TestOpenVerifyMixin, TestBaseOps, unittest.TestCase):
+class Test_4a_KLAP20GroupOps(
+    TestOpenVerify, TestOpen, TestBase, unittest.TestCase
+):
     scheme = "klap20"
 
 
-class TestKLAP20KeyOps(TestBaseKeyOps, unittest.TestCase):
+class Test_4b_KLAP20ExportImportOps(TestBaseExportImport, unittest.TestCase):
     scheme = "klap20"
 
 
-class TestKLAP20SignatureOps(TestBaseSignatureOps, unittest.TestCase):
-    scheme = "klap20"
-
-
-class TestKLAP20GMLOps(TestBaseGMLOps, unittest.TestCase):
-    scheme = "klap20"
-
-
-class TestGL19GroupOps(TestBaseOps, unittest.TestCase):
+class Test_5a_GL19GroupOps(TestBase, unittest.TestCase):
     scheme = "gl19"
 
 
-class TestGL19KeyOps(TestBaseKeyOps, unittest.TestCase):
+class Test_5b_GL19BlindOps(TestBlind, unittest.TestCase):
     scheme = "gl19"
 
 
-class TestGL19SignatureOps(TestBaseSignatureOps, unittest.TestCase):
+class Test_5c_GL19ExportImportOps(
+    TestBlindExportImport, TestBaseExportImport, unittest.TestCase
+):
     scheme = "gl19"
 
 
-class TestDL21GroupOps(TestBaseOps, unittest.TestCase):
+class Test_6a_DL21GroupOps(TestBase, unittest.TestCase):
     scheme = "dl21"
 
 
-class TestDL21KeyOps(TestBaseKeyOps, unittest.TestCase):
-    scheme = "dl21"
-
-
-class TestDL21SignatureOps(TestBaseSignatureOps, unittest.TestCase):
+class Test_6c_DL21ExportImportOps(TestBaseExportImport, unittest.TestCase):
     scheme = "dl21"
 
 

@@ -22,6 +22,7 @@ from pygroupsig.schemes.dl21seq import ManagerKey as DL21SEQMgrKey
 from pygroupsig.schemes.dl21seq import MemberKey as DL21SEQMemKey
 from pygroupsig.schemes.dl21seq import Signature as DL21SEQSignature
 from pygroupsig.schemes.gl19 import GL19
+from pygroupsig.schemes.gl19 import BlindKey as GL19BlindKey
 from pygroupsig.schemes.gl19 import GroupKey as GL19GrpKey
 from pygroupsig.schemes.gl19 import ManagerKey as GL19MgrKey
 from pygroupsig.schemes.gl19 import MemberKey as GL19MemKey
@@ -74,6 +75,9 @@ KEYS = {
         "dl21": DL21MemKey,
         "dl21seq": DL21SEQMemKey,
         "cpy06": CPY06MemKey,
+    },
+    "blind": {
+        "gl19": GL19BlindKey,
     },
 }
 
