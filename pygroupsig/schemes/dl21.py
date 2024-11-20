@@ -300,3 +300,83 @@ class DL21(ReprMixin, SchemeInterface):
             ret["message"] = "AA is zero"
             logger.error(ret["message"])
         return ret
+
+    def identify(self, signature, key, scope="def"):
+        scope = str(scope)
+        ret = {"status": "fail"}
+        sig = Signature.from_b64(signature)
+        ## Recompute nym
+        h = hashlib.sha256()
+        h.update(scope.encode())
+        hscp = G1.from_hash(h.digest())
+        nym = hscp * key.y
+        ## Check if nym = h(scp)*y
+        if nym == sig.nym:
+            ret["status"] = "success"
+        return ret
+
+    def link(self, message, messages, signatures, key, scope="def"):
+        scope = str(scope)
+        ret = {"status": "fail"}
+        hscp = G1()
+        for msg, sig_b64 in zip(messages, signatures):
+            ## Verify signature
+            ver_msg = self.verify(msg, sig_b64, scope=scope)
+            ## Check if it is a signature issued by memkey
+            iden_msg = self.identify(sig_b64, key, scope=scope)
+            h = hashlib.sha256()
+            if (
+                ver_msg["status"] == "success"
+                and iden_msg["status"] == "success"
+            ):
+                h.update(scope.encode())
+                ## "Accumulate" scp
+                hscp += G1.from_hash(h.digest())
+            else:
+                if ver_msg["status"] != "success":
+                    ret["message1"] = "signature verification failed"
+                    logger.error(ret["message1"])
+                if iden_msg["status"] != "success":
+                    ret["message2"] = "signature identify failed"
+                    logger.error(ret["message2"])
+                break
+        else:
+            # nym_ = hscp * y
+            nym = hscp * key.y
+            ## Do the SPK
+            pic, pis = spk.dlog_G1_sign(nym, hscp, key.y, message)
+            ret["status"] = "success"
+            ret["proof"] = {
+                "pic": pic.to_b64(),
+                "pis": pis.to_b64(),
+            }
+        return ret
+
+    def link_verify(self, message, messages, signatures, proof, scope="def"):
+        scope = str(scope)
+        ret = {"status": "fail"}
+        pic = Fr.from_b64(proof["pic"])
+        pis = Fr.from_b64(proof["pis"])
+        hscp = G1()
+        nym = G1()
+        for msg, sig_b64 in zip(messages, signatures):
+            ver_msg = self.verify(msg, sig_b64)
+            if ver_msg["status"] == "success":
+                h = hashlib.sha256()
+                h.update(scope.encode())
+                ## "Accumulate" scp
+                hscp += G1.from_hash(h.digest())
+                ## "Accumulate" nym
+                sig = Signature.from_b64(sig_b64)
+                nym += sig.nym
+            else:
+                ret["message"] = "signature verification failed"
+                logger.error(ret["message"])
+                break
+        else:
+            if spk.dlog_G1_verify(nym, hscp, pic, pis, message):
+                ret["status"] = "success"
+            else:
+                ret["message"] = "spk.dlog_G1_verify failed"
+                logger.error(ret["message"])
+        return ret

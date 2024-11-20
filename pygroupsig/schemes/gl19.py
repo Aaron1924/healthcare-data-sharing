@@ -465,11 +465,11 @@ class GL19(ReprMixin, SchemeInterface):
             "blind_key": blind_key.to_b64(),
         }
 
-    def convert(self, blind_signatures, blind_key_pk):
+    def convert(self, blind_signatures, blind_key_public):
         r = Fr.from_random()
         neg_csk = -self.mgrkey.csk
         converted_signatures = []
-        pk = G1.from_b64(blind_key_pk)
+        pk = G1.from_b64(blind_key_public)
         for bsig_b64 in blind_signatures:
             bsig = BlindSignature.from_b64(bsig_b64)
             r1 = Fr.from_random()

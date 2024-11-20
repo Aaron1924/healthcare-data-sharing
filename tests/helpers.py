@@ -287,12 +287,13 @@ class TestBlind(SetUpMixin, AddMemberMixin):
     def test_3b_convert(self):
         memkey = self.addMember()
         text = "Hello world!"
+        text2 = "World hello!"
         sig_msg = self.group.sign(text, memkey)
-        sig2_msg = self.group.sign(text, memkey)
+        sig2_msg = self.group.sign(text2, memkey)
         blind_msg = self.group.blind(text, sig_msg["signature"])
         bkey = key(b64=blind_msg["blind_key"])
         blind2_msg = self.group.blind(
-            text, sig2_msg["signature"], blind_key=bkey
+            text2, sig2_msg["signature"], blind_key=bkey
         )
         conv_msg = self.group.convert(
             [blind_msg["blind_signature"], blind2_msg["blind_signature"]],
@@ -303,12 +304,13 @@ class TestBlind(SetUpMixin, AddMemberMixin):
     def test_3c_unblind(self):
         memkey = self.addMember()
         text = "Hello world!"
+        text2 = "Word hello!"
         sig_msg = self.group.sign(text, memkey)
-        sig2_msg = self.group.sign(text, memkey)
+        sig2_msg = self.group.sign(text2, memkey)
         blind_msg = self.group.blind(text, sig_msg["signature"])
         bkey = key(b64=blind_msg["blind_key"])
         blind2_msg = self.group.blind(
-            text, sig2_msg["signature"], blind_key=bkey
+            text2, sig2_msg["signature"], blind_key=bkey
         )
         conv_msg = self.group.convert(
             [blind_msg["blind_signature"], blind2_msg["blind_signature"]],
@@ -322,16 +324,17 @@ class TestBlind(SetUpMixin, AddMemberMixin):
             nyms.append(unblind_msg["nym"])
         self.assertEqual(nyms[0], nyms[1])
 
-    def test_3d_blindConvertUnblindDifferentMember(self):
+    def test_3d_blindPipelineDifferentMember(self):
         memkey = self.addMember()
         memkey2 = self.addMember()
         text = "Hello world!"
+        text2 = "World hello!"
         sig_msg = self.group.sign(text, memkey)
-        sig2_msg = self.group.sign(text, memkey2)
+        sig2_msg = self.group.sign(text2, memkey2)
         blind_msg = self.group.blind(text, sig_msg["signature"])
         bkey = key(b64=blind_msg["blind_key"])
         blind2_msg = self.group.blind(
-            text, sig2_msg["signature"], blind_key=bkey
+            text2, sig2_msg["signature"], blind_key=bkey
         )
         conv_msg = self.group.convert(
             [blind_msg["blind_signature"], blind2_msg["blind_signature"]],
@@ -344,15 +347,16 @@ class TestBlind(SetUpMixin, AddMemberMixin):
             nyms.append(unblind_msg["nym"])
         self.assertNotEqual(nyms[0], nyms[1])
 
-    def test_3e_blindNonTransitiveConvertUnblind(self):
+    def test_3e_blindPipelineNonTransitive(self):
         memkey = self.addMember()
         text = "Hello world!"
+        text2 = "World hello!"
         sig_msg = self.group.sign(text, memkey)
-        sig2_msg = self.group.sign(text, memkey)
+        sig2_msg = self.group.sign(text2, memkey)
         blind_msg = self.group.blind(text, sig_msg["signature"])
         bkey = key(b64=blind_msg["blind_key"])
         blind2_msg = self.group.blind(
-            text, sig2_msg["signature"], blind_key=bkey
+            text2, sig2_msg["signature"], blind_key=bkey
         )
         conv_msg = self.group.convert(
             [blind_msg["blind_signature"]], bkey.public()
@@ -367,6 +371,130 @@ class TestBlind(SetUpMixin, AddMemberMixin):
             conv2_msg["converted_signatures"][0], bkey
         )
         self.assertNotEqual(unblind_msg["nym"], unblind2_msg["nym"])
+
+
+class TestLink(SetUpMixin, AddMemberMixin):
+    def test_3a_identify(self):
+        memkey = self.addMember()
+        sig_msg = self.group.sign("Hello world!", memkey)
+        iden_msg = self.group.identify(sig_msg["signature"], memkey)
+        self.assertEqual(iden_msg["status"], "success")
+
+    def test_3b_identifyDifferentScope(self):
+        memkey = self.addMember()
+        sig_msg = self.group.sign("Hello world!", memkey)
+        iden_msg = self.group.identify(
+            sig_msg["signature"], memkey, scope="fed"
+        )
+        self.assertEqual(iden_msg["status"], "fail")
+
+    def test_3c_link(self):
+        memkey = self.addMember()
+        text = "Hello world!"
+        text2 = "World hello!"
+        sig_msg = self.group.sign(text, memkey)
+        sig2_msg = self.group.sign(text2, memkey)
+        iden_msg = self.group.link(
+            "password",
+            [text, text2],
+            [sig_msg["signature"], sig2_msg["signature"]],
+            memkey,
+        )
+        self.assertEqual(iden_msg["status"], "success")
+
+    def test_3d_linkDifferentScope(self):
+        memkey = self.addMember()
+        text = "Hello world!"
+        text2 = "World hello!"
+        sig_msg = self.group.sign(text, memkey)
+        sig2_msg = self.group.sign(text2, memkey)
+        iden_msg = self.group.link(
+            "password",
+            [text, text2],
+            [sig_msg["signature"], sig2_msg["signature"]],
+            memkey,
+            scope="fed",
+        )
+        self.assertEqual(iden_msg["status"], "fail")
+
+    def test_3e_linkDifferentUser(self):
+        memkey = self.addMember()
+        gs, memkey2 = self.addMemberIsolated()
+        text = "Hello world!"
+        text2 = "World hello!"
+        sig_msg = self.group.sign(text, memkey)
+        sig2_msg = gs.sign(text2, memkey)
+        passw = "password"
+        iden_msg = self.group.link(
+            passw,
+            [text, text2],
+            [sig_msg["signature"], sig2_msg["signature"]],
+            memkey,
+        )
+        self.assertEqual(iden_msg["status"], "fail")
+
+    def test_3f_linkAndVerification(self):
+        memkey = self.addMember()
+        text = "Hello world!"
+        text2 = "World hello!"
+        sig_msg = self.group.sign(text, memkey)
+        sig2_msg = self.group.sign(text2, memkey)
+        passw = "password"
+        iden_msg = self.group.link(
+            passw,
+            [text, text2],
+            [sig_msg["signature"], sig2_msg["signature"]],
+            memkey,
+        )
+        idenver_msg = self.group.link_verify(
+            passw,
+            [text, text2],
+            [sig_msg["signature"], sig2_msg["signature"]],
+            iden_msg["proof"],
+        )
+        self.assertEqual(idenver_msg["status"], "success")
+
+    def test_3g_linkAndVerificationDifferentMessage(self):
+        memkey = self.addMember()
+        text = "Hello world!"
+        text2 = "World hello!"
+        sig_msg = self.group.sign(text, memkey)
+        sig2_msg = self.group.sign(text2, memkey)
+        iden_msg = self.group.link(
+            "password",
+            [text, text2],
+            [sig_msg["signature"], sig2_msg["signature"]],
+            memkey,
+        )
+        idenver_msg = self.group.link_verify(
+            "password2",
+            [text, text2],
+            [sig_msg["signature"], sig2_msg["signature"]],
+            iden_msg["proof"],
+        )
+        self.assertEqual(idenver_msg["status"], "fail")
+
+    def test_3h_linkAndVerificationDifferentScope(self):
+        memkey = self.addMember()
+        text = "Hello world!"
+        text2 = "World hello!"
+        sig_msg = self.group.sign(text, memkey)
+        sig2_msg = self.group.sign(text2, memkey)
+        passw = "password"
+        iden_msg = self.group.link(
+            passw,
+            [text, text2],
+            [sig_msg["signature"], sig2_msg["signature"]],
+            memkey,
+        )
+        idenver_msg = self.group.link_verify(
+            passw,
+            [text, text2],
+            [sig_msg["signature"], sig2_msg["signature"]],
+            iden_msg["proof"],
+            scope="fed",
+        )
+        self.assertEqual(idenver_msg["status"], "fail")
 
 
 class TestBaseExportImport(SetUpMixin, AddMemberMixin):

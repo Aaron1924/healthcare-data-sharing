@@ -7,6 +7,7 @@ from tests.helpers import (
     TestBaseExportImport,
     TestBlind,
     TestBlindExportImport,
+    TestLink,
     TestOpen,
     TestOpenVerify,
     TestReveal,
@@ -72,6 +73,10 @@ class Test_5c_GL19ExportImportOps(
 
 
 class Test_6a_DL21GroupOps(TestBase, unittest.TestCase):
+    scheme = "dl21"
+
+
+class Test_6b_DL21LinkOps(TestLink, unittest.TestCase):
     scheme = "dl21"
 
 
