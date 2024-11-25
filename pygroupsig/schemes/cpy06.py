@@ -1,17 +1,19 @@
 import hashlib
-import json
 import logging
 
-import pygroupsig.spk as spk
-from pygroupsig.helpers import CRL, GML, B64Mixin, InfoMixin, ReprMixin
+import pygroupsig.utils.spk as spk
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
-from pygroupsig.pairings.mcl import G1, G2, GT, Fr
+from pygroupsig.utils.helpers import (
+    CRL,
+    GML,
+    B64Mixin,
+    InfoMixin,
+    JoinMixin,
+    ReprMixin,
+)
+from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
 _NAME = "cpy06"
-_SEQ = 3
-_START = 0
-
-logger = logging.getLogger(__name__)
 
 
 class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
@@ -74,7 +76,9 @@ class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.st = Fr()
 
 
-class CPY06(ReprMixin, SchemeInterface):
+class CPY06(JoinMixin, ReprMixin, SchemeInterface):
+    _logger = logging.getLogger(__name__)
+
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
@@ -133,17 +137,16 @@ class CPY06(ReprMixin, SchemeInterface):
         else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
                 return ret
             phase = message["phase"]
             if phase == 2:
                 ## Input message is <I,pi,spk>
-                _I = G1.from_b64(message["I"])
+                I_ = G1.from_b64(message["I"])
                 pi = G1.from_b64(message["pi"])
-                pic = Fr.from_b64(message["pic"])
-                pis = [Fr.from_b64(el) for el in json.loads(message["pis"])]
+                proof = spk.GeneralRepresentationProof.from_b64(message["spk"])
                 Y = [pi, pi]
-                G = [self._g1, _I, self.grpkey.q]
+                G = [self._g1, I_, self.grpkey.q]
                 i = [
                     (0, 0),  # x*g1 (g[0],x[0])
                     (1, 0),  # v*g1 (g[0],x[1])
@@ -152,7 +155,9 @@ class CPY06(ReprMixin, SchemeInterface):
                 ]
                 prods = [1, 3]
 
-                if spk.rep_verify(Y, G, i, prods, pic, pis, pi.to_bytes()):
+                if spk.general_representation_verify(
+                    Y, G, i, prods, proof, pi.to_bytes()
+                ):
                     # t \in_R Z^*_p
                     t = Fr.from_random()
                     # A = (pi+q) * ((gamma+t)**-1)
@@ -171,20 +176,20 @@ class CPY06(ReprMixin, SchemeInterface):
                     ret["phase"] = phase + 1
                 else:
                     ret["status"] = "fail"
-                    ret["message"] = "spk.rep_verify failed"
-                    logger.error(ret["message"])
+                    ret["message"] = "Invalid message content"
+                    self._logger.debug("spk.rep_verify failed")
             else:
                 ret["message"] = (
                     f"Phase not supported for {self.__class__.__name__}"
                 )
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
         return ret
 
     def join_mem(self, message, key):
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
             return ret
         phase = message["phase"]
         if phase == 1:
@@ -204,7 +209,7 @@ class CPY06(ReprMixin, SchemeInterface):
             s = (Fr * 2)()
             s[0].set_object(y)
             s[1].set_object(r)
-            _I = G1.muln(e, s)
+            I_ = G1.muln(e, s)
 
             ## memkey->x = u*memkey->y + v
             key.x.set_object((u * y) + v)
@@ -217,7 +222,7 @@ class CPY06(ReprMixin, SchemeInterface):
 
             ## We'll be signing pi in the SPK
             Y = [pi, pi]
-            G = [self._g1, _I, self.grpkey.q]
+            G = [self._g1, I_, self.grpkey.q]
             x = [key.x, v, u, rr]
             i = [
                 (0, 0),  # x*g1 (g[0],x[0])
@@ -227,36 +232,37 @@ class CPY06(ReprMixin, SchemeInterface):
             ]
             prods = [1, 3]
 
-            pic, pis = spk.rep_sign(Y, G, x, i, prods, pi.to_bytes())
+            proof = spk.general_representation_sign(
+                Y, G, x, i, prods, pi.to_bytes()
+            )
             ret["status"] = "success"
-            ret["I"] = _I.to_b64()
+            ret["I"] = I_.to_b64()
             ret["pi"] = pi.to_b64()
-            ret["pic"] = pic.to_b64()
-            ret["pis"] = json.dumps([p.to_b64() for p in pis])
+            ret["spk"] = proof.to_b64()
             ret["phase"] = phase + 1
         elif phase == 3:
             ## Import partial key from message
-            _t = Fr.from_b64(message["t"])
-            _A = G1.from_b64(message["A"])
-            aux_g2 = (self._g2 * _t) + self.grpkey.r
+            t_ = Fr.from_b64(message["t"])
+            A_ = G1.from_b64(message["A"])
+            aux_g2 = (self._g2 * t_) + self.grpkey.r
             aux_g1 = (self._g1 * key.x) + self.grpkey.q
 
-            aux_gt1 = GT.pairing(_A, aux_g2)
+            aux_gt1 = GT.pairing(A_, aux_g2)
             aux_gt2 = GT.pairing(aux_g1, self._g2)
             if aux_gt1 == aux_gt2:
                 ## All good: transfer all data to memkey
-                key.t.set_object(_t)
-                key.A.set_object(_A)
+                key.t.set_object(t_)
+                key.A.set_object(A_)
                 ret["status"] = "success"
             else:
                 ret["status"] = "fail"
-                ret["message"] = "aux_gt1 != aux_gt2"
-                logger.error(ret["message"])
+                ret["message"] = "Invalid message content"
+                self._logger.debug("aux_gt1 != aux_gt2")
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
         return ret
 
     def sign(self, message, key):
@@ -401,11 +407,11 @@ class CPY06(ReprMixin, SchemeInterface):
         c = Fr.from_hash(h.digest())
 
         ## Compare the result with the received challenge
-        if sig.c == c:
+        if c == sig.c:
             ret["status"] = "success"
         else:
-            ret["message"] = "sig.c != c"
-            logger.error(ret["message"])
+            ret["message"] = "Invalid signature"
+            self._logger.debug("c != sig.c")
         return ret
 
     def open(self, signature):
@@ -470,14 +476,16 @@ class CPY06(ReprMixin, SchemeInterface):
             h.update(e.to_bytes())
             ## ... and T5
             h.update(sig.T5.to_bytes())
+
+        proof = spk.NizkProof()
         ## (2) Calculate c = hash((e(g1,T4)^r)[1] || (e(g1,T4))[1] || ... ||
         ## (e(g1,T4)^r)[n] || (e(g1,T4))[n] )
-        c = Fr.from_hash(h.digest())
+        proof.c.set_hash(h.digest())
         ## (3) To end, get s = r - c*x
-        s = r + (c * key.x)
+        proof.s.set_object(r + (proof.c * key.x))
         return {
             "status": "success",
-            "proof": {"pic": c.to_b64(), "pis": s.to_b64()},
+            "proof": proof.to_b64(),
         }
 
     def prove_equality_verify(self, signatures, proof):
@@ -486,12 +494,11 @@ class CPY06(ReprMixin, SchemeInterface):
         h = hashlib.sha256()
         ## We have to recover the e(g1,T4)^r objects. To do so,
         ## we divide e(g1,T4)^s/T5^c
-        pic = Fr.from_b64(proof["pic"])
-        pis = Fr.from_b64(proof["pis"])
+        proof_ = spk.NizkProof.from_b64(proof)
         for s in signatures:
             sig = Signature.from_b64(s)
             e = GT.pairing(self._g1, sig.T4)
-            es = (e**pis) / (sig.T5**pic)
+            es = (e**proof_.s) / (sig.T5**proof_.c)
             ## Put the i-th element of the array
             h.update(es.to_bytes())
             ## Put also the base (the e(g1,T4)'s) into the hash
@@ -503,11 +510,11 @@ class CPY06(ReprMixin, SchemeInterface):
         ## (e(g1,T4)^r)[n] || (e(g1,T4))[n] )
         ## Now, we have to get c as an element
         c = Fr.from_hash(h.digest())
-        if c == pic:
+        if c == proof_.c:
             ret["status"] = "success"
         else:
-            ret["message"] = "e != pic"
-            logger.error(ret["message"])
+            ret["message"] = "Invalid proof"
+            self._logger.debug("c != proof_.c")
         return ret
 
     def claim(self, signature, key):

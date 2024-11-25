@@ -2,7 +2,10 @@ import importlib
 import json
 from base64 import b64decode, b64encode
 
-from pygroupsig.pairings.mcl import Fr
+from pygroupsig.utils.mcl import Fr
+
+_SEQ = 3
+_START = 0
 
 
 class ReprMixin:
@@ -24,8 +27,10 @@ class B64Mixin:
             obj = getattr(self, v)
             if isinstance(obj, list):
                 dump[v] = [el.to_b64() for el in obj]
-            elif isinstance(obj, int):
+            elif isinstance(obj, int) or isinstance(obj, dict):
                 dump[v] = obj
+            elif isinstance(obj, str):
+                dump[v] = f"str_{obj}"
             else:
                 dump[v] = obj.to_b64()
         data = b64encode(json.dumps(dump).encode()).decode()
@@ -53,8 +58,10 @@ class B64Mixin:
             obj = getattr(self, k)
             if isinstance(it[k], list):
                 obj.extend([Fr.from_b64(el) for el in it[k]])
-            elif isinstance(it[k], int):
+            elif isinstance(it[k], int) or isinstance(it[k], dict):
                 setattr(self, k, it[k])
+            elif it[k].startswith("str_"):
+                setattr(self, k, it[k].split("_")[1])
             else:
                 obj.set_b64(it[k])
 
@@ -68,6 +75,14 @@ class B64Mixin:
 class InfoLMixin:
     def info(self):
         return self._NAME, self._CTYPE
+
+
+class JoinMixin:
+    def join_seq(self):
+        return _SEQ
+
+    def join_start(self):
+        return _START
 
 
 class ContainerDict(dict):
@@ -89,12 +104,12 @@ class ContainerDict(dict):
         for mem_id, data in imp.items():
             values = []
             for el in data:
-                _c, _v = el.split("|")
-                path = _c.split(".")
+                c, v = el.split("|")
+                path = c.split(".")
                 module_name, class_name = ".".join(path[:-1]), path[-1]
                 mod = importlib.import_module(module_name)
                 cls = getattr(mod, class_name)
-                values.append(cls.from_b64(_v))
+                values.append(cls.from_b64(v))
             self[mem_id] = tuple(values)
 
     @classmethod

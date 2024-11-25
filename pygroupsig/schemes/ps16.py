@@ -1,16 +1,18 @@
 import hashlib
 import logging
 
-import pygroupsig.spk as spk
-from pygroupsig.helpers import GML, B64Mixin, InfoMixin, ReprMixin
+import pygroupsig.utils.spk as spk
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
-from pygroupsig.pairings.mcl import G1, G2, GT, Fr
+from pygroupsig.utils.helpers import (
+    GML,
+    B64Mixin,
+    InfoMixin,
+    JoinMixin,
+    ReprMixin,
+)
+from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
 _NAME = "ps16"
-_SEQ = 3
-_START = 0
-
-logger = logging.getLogger(__name__)
 
 
 class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
@@ -50,11 +52,12 @@ class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     def __init__(self):
         self.sigma1 = G1()
         self.sigma2 = G1()
-        self.c = Fr()
-        self.s = Fr()
+        self.pi = spk.DiscreteLogProof()
 
 
-class PS16(ReprMixin, SchemeInterface):
+class PS16(JoinMixin, ReprMixin, SchemeInterface):
+    _logger = logging.getLogger(__name__)
+
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
@@ -83,7 +86,7 @@ class PS16(ReprMixin, SchemeInterface):
         else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
                 return ret
             phase = message["phase"]
             if phase == 2:
@@ -91,11 +94,10 @@ class PS16(ReprMixin, SchemeInterface):
                 n = G1.from_b64(message["n"])
                 tau = G1.from_b64(message["tau"])
                 ttau = G2.from_b64(message["ttau"])
-                pic = Fr.from_b64(message["pic"])
-                pis = Fr.from_b64(message["pis"])
+                proof = spk.DiscreteLogProof.from_b64(message["pi"])
 
-                if spk.dlog_G1_verify(
-                    tau, self.grpkey.g, pic, pis, n.to_bytes()
+                if spk.discrete_log_verify(
+                    tau, self.grpkey.g, proof, n.to_bytes()
                 ):
                     e1 = GT.pairing(tau, self.grpkey.Y)
                     e2 = GT.pairing(self.grpkey.g, ttau)
@@ -122,24 +124,24 @@ class PS16(ReprMixin, SchemeInterface):
                         ret["phase"] = phase + 1
                     else:
                         ret["status"] = "fail"
-                        ret["message"] = "e1 != e2"
-                        logger.error(ret["message"])
+                        ret["message"] = "Invalid message content"
+                        self._logger.debug("e1 != e2")
                 else:
                     ret["status"] = "fail"
-                    ret["message"] = "spk.dlog_G1_verify failed"
-                    logger.error(ret["message"])
+                    ret["message"] = "Invalid message content"
+                    self._logger.debug("spk.dlog_G1_verify failed")
             else:
                 ret["message"] = (
                     f"Phase not supported for {self.__class__.__name__}"
                 )
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
         return ret
 
     def join_mem(self, message, key):
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
             return ret
         phase = message["phase"]
         if phase == 1:
@@ -152,7 +154,7 @@ class PS16(ReprMixin, SchemeInterface):
             ttau = self.grpkey.Y * key.sk
 
             ## Compute the SPK for sk
-            pic, pis = spk.dlog_G1_sign(
+            proof = spk.discrete_log_sign(
                 tau, self.grpkey.g, key.sk, n.to_bytes()
             )
 
@@ -161,13 +163,12 @@ class PS16(ReprMixin, SchemeInterface):
             ret["n"] = n.to_b64()
             ret["tau"] = tau.to_b64()
             ret["ttau"] = ttau.to_b64()
-            ret["pic"] = pic.to_b64()
-            ret["pis"] = pis.to_b64()
+            ret["pi"] = proof.to_b64()
             ret["phase"] = phase + 1
         elif phase == 3:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
                 return ret
             ## Check correctness of computation and update memkey
 
@@ -181,7 +182,7 @@ class PS16(ReprMixin, SchemeInterface):
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
         return ret
 
     def sign(self, message, key):
@@ -209,8 +210,8 @@ class PS16(ReprMixin, SchemeInterface):
         h.update(message.encode())
 
         ## Complete the sig
-        sig.c.set_hash(h.digest())
-        sig.s.set_object(k + (sig.c * key.sk))
+        sig.pi.c.set_hash(h.digest())
+        sig.pi.s.set_object(k + (sig.pi.c * key.sk))
         return {
             "status": "success",
             "signature": sig.to_b64(),
@@ -226,10 +227,10 @@ class PS16(ReprMixin, SchemeInterface):
         # e2 = e(sigma2,gg)
         e2 = GT.pairing(sig.sigma2, self.grpkey.gg)
         # e3 = e(sigma1*s,Y)
-        e3 = GT.pairing(sig.sigma1 * sig.s, self.grpkey.Y)
+        e3 = GT.pairing(sig.sigma1 * sig.pi.s, self.grpkey.Y)
 
         # R = ((e1*e2)**-c)*e3
-        R = ~((e1 * e2) ** sig.c) * e3
+        R = ~((e1 * e2) ** sig.pi.c) * e3
 
         h = hashlib.sha256()
         h.update(sig.sigma1.to_bytes())
@@ -241,11 +242,11 @@ class PS16(ReprMixin, SchemeInterface):
         c = Fr.from_hash(h.digest())
 
         ## Compare the result with the received challenge
-        if sig.c == c:
+        if c == sig.pi.c:
             ret["status"] = "success"
         else:
-            ret["message"] = "sig.c != c"
-            logger.error(ret["message"])
+            ret["message"] = "Invalid signature"
+            self._logger.debug("c != sig.pi.c")
         return ret
 
     def open(self, signature):
@@ -259,23 +260,22 @@ class PS16(ReprMixin, SchemeInterface):
             if e4 == e3:
                 ret["status"] = "success"
                 ret["id"] = mem_id
-                pic, pis = spk.pairing_homomorphism_G2_sign(
+                proof = spk.pairing_homomorphism_sign(
                     sig.sigma1, e3, ttau, sig.to_b64()
                 )
-                ret["proof"] = {"pic": pic.to_b64(), "pis": pis.to_b64()}
+                ret["proof"] = proof.to_b64()
                 break
         return ret
 
     def open_verify(self, signature, proof):
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
-        pic = Fr.from_b64(proof["pic"])
-        pis = G2.from_b64(proof["pis"])
+        proof_ = spk.PairingHomomorphismProof.from_b64(proof)
         e1 = GT.pairing(sig.sigma2, self.grpkey.gg)
         e2 = GT.pairing(sig.sigma1, self.grpkey.X)
         e4 = e1 / e2
-        if spk.pairing_homomorphism_G2_verify(
-            sig.sigma1, e4, pic, pis, sig.to_b64()
+        if spk.pairing_homomorphism_verify(
+            sig.sigma1, e4, proof_, sig.to_b64()
         ):
             ret["status"] = "success"
         return ret

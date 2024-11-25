@@ -1,18 +1,20 @@
 import hashlib
 import logging
 
-from pygroupsig.helpers import GML, B64Mixin, InfoMixin, ReprMixin
 from pygroupsig.interfaces import (
     ContainerInterface,
     SchemeInterface,
 )
-from pygroupsig.pairings.mcl import G1, G2, GT, Fr
+from pygroupsig.utils.helpers import (
+    GML,
+    B64Mixin,
+    InfoMixin,
+    JoinMixin,
+    ReprMixin,
+)
+from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
 _NAME = "bbs04"
-_SEQ = 1
-_START = 0
-
-logger = logging.getLogger(__name__)
 
 
 class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
@@ -68,7 +70,9 @@ class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.sdelta2 = Fr()
 
 
-class BBS04(ReprMixin, SchemeInterface):
+class BBS04(JoinMixin, ReprMixin, SchemeInterface):
+    _logger = logging.getLogger(__name__)
+
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
@@ -112,6 +116,9 @@ class BBS04(ReprMixin, SchemeInterface):
         # g1g2 = e(g2, g2)
         self.grpkey.g1g2.set_object(GT.pairing(self.grpkey.g1, self.grpkey.g2))
 
+    def join_seq(self):
+        return 1
+
     def join_mgr(self, message=None):
         ret = {"status": "error"}
         if message is None:
@@ -138,14 +145,14 @@ class BBS04(ReprMixin, SchemeInterface):
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
         return ret
 
     def join_mem(self, message, key):
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
             return ret
         phase = message["phase"]
         if phase == 1:
@@ -160,7 +167,7 @@ class BBS04(ReprMixin, SchemeInterface):
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
         return ret
 
     def sign(self, message, key):
@@ -308,8 +315,8 @@ class BBS04(ReprMixin, SchemeInterface):
         if sig.c == c:
             ret["status"] = "success"
         else:
-            ret["message"] = "sig.c != c"
-            logger.error(ret["message"])
+            ret["message"] = "Invalid signature"
+            self._logger.debug("sig.c != c")
         return ret
 
     def open(self, signature):

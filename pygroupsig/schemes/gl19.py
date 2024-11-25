@@ -3,16 +3,12 @@ import logging
 import random
 import time
 
-import pygroupsig.spk as spk
-from pygroupsig.helpers import B64Mixin, InfoMixin, ReprMixin
+import pygroupsig.utils.spk as spk
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
-from pygroupsig.pairings.mcl import G1, G2, GT, Fr
+from pygroupsig.utils.helpers import B64Mixin, InfoMixin, JoinMixin, ReprMixin
+from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
 _NAME = "gl19"
-_SEQ = 3
-_START = 0
-
-logger = logging.getLogger(__name__)
 
 
 class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
@@ -85,8 +81,7 @@ class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.AA = G1()
         self.A_ = G1()
         self.d = G1()
-        self.c = Fr()
-        self.s = []
+        self.pi = spk.GeneralRepresentationProof()
         self.nym1 = G1()
         self.nym2 = G1()
         self.ehy1 = G1()
@@ -111,9 +106,10 @@ class BlindSignature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.c2 = G1()
 
 
-class GL19(ReprMixin, SchemeInterface):
+class GL19(JoinMixin, ReprMixin, SchemeInterface):
     LIFETIME = 60 * 60 * 24 * 14  # two weeks
     # TODO: add lifetime setter
+    _logger = logging.getLogger(__name__)
 
     def __init__(self):
         self.grpkey = GroupKey()
@@ -166,18 +162,17 @@ class GL19(ReprMixin, SchemeInterface):
         else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
                 return ret
             phase = message["phase"]
             if phase == 2:
                 ## Compute credential from H and pi_H. Verify the proof
                 n = G1.from_b64(message["n"])
                 H = G1.from_b64(message["H"])
-                pic = Fr.from_b64(message["pic"])
-                pis = Fr.from_b64(message["pis"])
+                proof = spk.DiscreteLogProof.from_b64(message["pi"])
 
-                if spk.dlog_G1_verify(
-                    H, self.grpkey.h1, pic, pis, n.to_bytes()
+                if spk.discrete_log_verify(
+                    H, self.grpkey.h1, proof, n.to_bytes()
                 ):
                     ## Pick x and s at random from Z*_p
                     x = Fr.from_random()
@@ -208,20 +203,20 @@ class GL19(ReprMixin, SchemeInterface):
                     ret["phase"] = phase + 1
                 else:
                     ret["status"] = "fail"
-                    ret["message"] = "spk.dlog_G1_verify failed"
-                    logger.error(ret["message"])
+                    ret["message"] = "Invalid message content"
+                    self._logger.debug("spk.dlog_G1_verify failed")
             else:
                 ret["message"] = (
                     f"Phase not supported for {self.__class__.__name__}"
                 )
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
         return ret
 
     def join_mem(self, message, key):
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
             return ret
         phase = message["phase"]
         if phase == 1:
@@ -235,7 +230,7 @@ class GL19(ReprMixin, SchemeInterface):
             key.H.set_object(self.grpkey.h1 * key.y)
 
             ## Compute the SPK
-            pic, pis = spk.dlog_G1_sign(
+            proof = spk.discrete_log_sign(
                 key.H, self.grpkey.h1, key.y, n.to_bytes()
             )
 
@@ -243,8 +238,7 @@ class GL19(ReprMixin, SchemeInterface):
             ret["status"] = "success"
             ret["n"] = n.to_b64()
             ret["H"] = key.H.to_b64()
-            ret["pic"] = pic.to_b64()
-            ret["pis"] = pis.to_b64()
+            ret["pi"] = proof.to_b64()
             ret["phase"] = phase + 1
         elif phase == 3:
             ## Check correctness of computation and update memkey
@@ -276,17 +270,17 @@ class GL19(ReprMixin, SchemeInterface):
                     ret["status"] = "success"
                 else:
                     ret["status"] = "fail"
-                    ret["message"] = "e4 != e3"
-                    logger.error(ret["message"])
+                    ret["message"] = "Invalid message content"
+                    self._logger.debug("e4 != e3")
             else:
                 ret["status"] = "fail"
-                ret["message"] = "A is zero"
-                logger.error(ret["message"])
+                ret["message"] = "Invalid message content"
+                self._logger.debug("A is zero")
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
         return ret
 
     def sign(self, message, key):
@@ -371,11 +365,11 @@ class GL19(ReprMixin, SchemeInterface):
         ## The SPK'ed message becomes the message to sign concatenated with the
         ## credential expiration date
         sig.expiration = key.l
-        pic, pis = spk.rep_sign(
+        proof = spk.general_representation_sign(
             y, g, x, i, prods, f"{sig.expiration}|{message}"
         )
-        sig.c.set_object(pic)
-        sig.s.extend(pis)
+        sig.pi.c.set_object(proof.c)
+        sig.pi.s.extend(proof.s)
 
         return {
             "status": "success",
@@ -424,13 +418,13 @@ class GL19(ReprMixin, SchemeInterface):
         prods = [1, 2, 2, 3, 1, 2]
 
         ## Verify SPK
-        if spk.rep_verify(
-            y, g, i, prods, sig.c, sig.s, f"{sig.expiration}|{message}"
+        if spk.general_representation_verify(
+            y, g, i, prods, sig.pi, f"{sig.expiration}|{message}"
         ):
             ret["status"] = "success"
         else:
-            ret["message"] = "spk.rep_verify failed"
-            logger.error(ret["message"])
+            ret["message"] = "Invalid signature"
+            self._logger.debug("spk.rep_verify failed")
         return ret
 
     def blind(self, message, signature, blind_key=None):
@@ -498,7 +492,7 @@ class GL19(ReprMixin, SchemeInterface):
         csig = BlindSignature.from_b64(converted_signature)
         ## Decrypt the pseudonym with the blinding private key
         aux_zn = -blind_key.sk
-        _id = (csig.nym1 * aux_zn) + csig.nym2
+        id_ = (csig.nym1 * aux_zn) + csig.nym2
 
         ## Decrypt the (hashed) message with the blinding private key
         aux_G1 = csig.c1 * aux_zn
@@ -508,7 +502,7 @@ class GL19(ReprMixin, SchemeInterface):
         ## Really required? It has no use
         return {
             "status": "success",
-            "nym": _id.to_b64(),
+            "nym": id_.to_b64(),
         }
 
 

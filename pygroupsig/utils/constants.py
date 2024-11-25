@@ -5,11 +5,6 @@ import os
 MCLBN_FP_UNIT_SIZE = 6
 MCLBN_FR_UNIT_SIZE = 4
 
-## TODO: remove
-# include/lib/bls12_381.hpp
-MCL_MAX_FP_BIT_SIZE = 384
-MCL_MAX_FR_BIT_SIZE = 256
-
 # include/lib/curve_type.h
 MCL_BLS12_381 = 5
 

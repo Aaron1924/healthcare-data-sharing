@@ -2,7 +2,7 @@ import ctypes
 import logging
 from base64 import b64decode, b64encode
 
-import pygroupsig.pairings.utils as ut
+import pygroupsig.utils.constants as ct
 
 
 class Base(ctypes.Structure):
@@ -88,11 +88,17 @@ class Base(ctypes.Structure):
         return b64encode(self.to_bytes()).decode()
 
     def set_b64(self, s):
-        return self.set_bytes(b64decode(s.encode()))
+        if isinstance(s, str):
+            s = s.encode()
+        elif not isinstance(s, bytes):
+            raise TypeError(f"Invalid {s} type. Expected str/bytes")
+        return self.set_bytes(b64decode(s))
 
     @classmethod
     def from_b64(cls, s):
-        return cls.from_bytes(b64decode(s.encode()))
+        ret = cls()
+        ret.set_b64(s)
+        return ret
 
     def set_object(self, y):
         return self.set_bytes(y.to_bytes())
@@ -103,7 +109,7 @@ class Base(ctypes.Structure):
 
     @classmethod
     def byte_size(cls):
-        func = getattr(ut.lib, f"mclBn_get{cls.__name__}ByteSize")
+        func = getattr(ct.lib, f"mclBn_get{cls.__name__}ByteSize")
         func.restype = ctypes.c_int
         return func()
 
@@ -112,7 +118,7 @@ class Base(ctypes.Structure):
             f.write(self.to_b64())
 
     def set_file(self, file):
-        with open(file, "r") as f:
+        with open(file) as f:
             return self.set_b64(f.read())
 
     @classmethod
@@ -140,7 +146,7 @@ class Base(ctypes.Structure):
             return func(self, y)
 
     def _func(self, fn, argtypes, restype=None):
-        func = getattr(ut.lib, self.SIG.format(self.__class__.__name__, fn))
+        func = getattr(ct.lib, self.SIG.format(self.__class__.__name__, fn))
         func.argtypes = argtypes
         func.restype = restype
         return func
@@ -376,9 +382,9 @@ class GenPrngMixin:
 
 class GeneratorMixin:
     def set_generator(self):
-        s = ut.BLS12_381_P
+        s = ct.BLS12_381_P
         if isinstance(self, G2):
-            s = ut.BLS12_381_Q
+            s = ct.BLS12_381_Q
         self.set_str(s)
 
     @classmethod
@@ -396,7 +402,7 @@ class Fp(
     IntMixin,
     Base,
 ):
-    _fields_ = [("d", ctypes.c_uint64 * ut.MCLBN_FP_UNIT_SIZE)]
+    _fields_ = [("d", ctypes.c_uint64 * ct.MCLBN_FP_UNIT_SIZE)]
 
 
 class Fr(
@@ -407,7 +413,7 @@ class Fr(
     IntMixin,
     Base,
 ):
-    _fields_ = [("d", ctypes.c_uint64 * ut.MCLBN_FR_UNIT_SIZE)]
+    _fields_ = [("d", ctypes.c_uint64 * ct.MCLBN_FR_UNIT_SIZE)]
 
 
 class Fp2(OneInvDivMixin, Base):
@@ -465,7 +471,7 @@ class GT(StrMixin, OneInvDivMixin, MulVecMixin, PowFrMixin, IntMixin, Base):
 
     @classmethod
     def pairing(cls, e1, e2):
-        func = getattr(ut.lib, "mclBn_pairing")
+        func = getattr(ct.lib, "mclBn_pairing")
         func.argtypes = [
             ctypes.POINTER(cls),
             ctypes.POINTER(G1),

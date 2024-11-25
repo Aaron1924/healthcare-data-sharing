@@ -1,28 +1,23 @@
 import unittest
 
 from tests.helpers import (
-    AddMember2Mixin,
-    TestAddMember2,
     TestBase,
     TestBaseExportImport,
     TestBlind,
     TestBlindExportImport,
     TestLink,
+    TestLinkSeq,
     TestOpen,
     TestOpenVerify,
     TestReveal,
 )
 
 
-class Test_1a_BBS04GroupOps(
-    TestOpen, TestAddMember2, AddMember2Mixin, TestBase, unittest.TestCase
-):
+class Test_1a_BBS04GroupOps(TestOpen, TestBase, unittest.TestCase):
     scheme = "bbs04"
 
 
-class Test_1b_BBS04ExportImportOps(
-    AddMember2Mixin, TestBaseExportImport, unittest.TestCase
-):
+class Test_1b_BBS04ExportImportOps(TestBaseExportImport, unittest.TestCase):
     scheme = "bbs04"
 
 
@@ -82,6 +77,18 @@ class Test_6b_DL21LinkOps(TestLink, unittest.TestCase):
 
 class Test_6c_DL21ExportImportOps(TestBaseExportImport, unittest.TestCase):
     scheme = "dl21"
+
+
+class Test_7a_DL21SEQGroupOps(TestBase, unittest.TestCase):
+    scheme = "dl21seq"
+
+
+class Test_7b_DL21SEQLinkOps(TestLinkSeq, TestLink, unittest.TestCase):
+    scheme = "dl21seq"
+
+
+class Test_7c_DL21SEQExportImportOps(TestBaseExportImport, unittest.TestCase):
+    scheme = "dl21seq"
 
 
 if __name__ == "__main__":

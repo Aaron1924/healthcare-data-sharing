@@ -1,18 +1,19 @@
 import hashlib
-import json
 import logging
 import random
 
-import pygroupsig.spk as spk
-from pygroupsig.helpers import GML, B64Mixin, InfoMixin, ReprMixin
+import pygroupsig.utils.spk as spk
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
-from pygroupsig.pairings.mcl import G1, G2, GT, Fr
+from pygroupsig.utils.helpers import (
+    GML,
+    B64Mixin,
+    InfoMixin,
+    JoinMixin,
+    ReprMixin,
+)
+from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
 _NAME = "klap20"
-_SEQ = 3
-_START = 0
-
-logger = logging.getLogger(__name__)
 
 
 class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
@@ -58,11 +59,12 @@ class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.uu = G1()
         self.vv = G1()
         self.ww = G1()
-        self.c = Fr()
-        self.s = Fr()
+        self.pi = spk.DiscreteLogProof()
 
 
-class KLAP20(ReprMixin, SchemeInterface):
+class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
+    _logger = logging.getLogger(__name__)
+
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
@@ -103,11 +105,11 @@ class KLAP20(ReprMixin, SchemeInterface):
         else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
                 return ret
             phase = message["phase"]
             if phase == 2:
-                ## Import the (n,f,w,SSO,SS1,ff0,ff1,pic,pis) ad hoc message
+                ## Import the (n,f,w,SSO,SS1,ff0,ff1,pi) ad hoc message
                 n = G1.from_b64(message["n"])
                 f = G1.from_b64(message["f"])
                 w = G1.from_b64(message["w"])
@@ -115,8 +117,7 @@ class KLAP20(ReprMixin, SchemeInterface):
                 SS1 = G2.from_b64(message["SS1"])
                 ff0 = G2.from_b64(message["ff0"])
                 ff1 = G2.from_b64(message["ff1"])
-                pic = Fr.from_b64(message["pic"])
-                pis = [Fr.from_b64(el) for el in json.loads(message["pis"])]
+                proof = spk.GeneralRepresentationProof.from_b64(message["pi"])
                 ## Check the SPK -- this will change with issue23
                 ## Compute the SPK for sk -- this will be replaced in issue23
                 # u = Hash(f)
@@ -142,7 +143,9 @@ class KLAP20(ReprMixin, SchemeInterface):
                     (2, 4),
                 ]  # s1, ZZ1
                 prods = [1, 1, 1, 1, 2, 2]
-                if spk.verify(y, g, i, prods, pic, pis, n.to_bytes()):
+                if spk.general_representation_verify(
+                    y, g, i, prods, proof, n.to_bytes(), manual=True
+                ):
                     v = (u * self.mgrkey.x) + (w * self.mgrkey.y)
                     # Add the tuple (i,SS0,SS1,ff0,ff1,tau) to the GML
                     tau = GT.pairing(f, self.grpkey.gg)
@@ -161,20 +164,20 @@ class KLAP20(ReprMixin, SchemeInterface):
                     ret["phase"] = phase + 1
                 else:
                     ret["status"] = "fail"
-                    ret["message"] = "spk.verify failed"
-                    logger.error(ret["message"])
+                    ret["message"] = "Invalid message content"
+                    self._logger.debug("spk.verify failed")
             else:
                 ret["message"] = (
                     f"Phase not supported for {self.__class__.__name__}"
                 )
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
         return ret
 
     def join_mem(self, message, key):
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
             return ret
         phase = message["phase"]
         if phase == 1:
@@ -231,7 +234,9 @@ class KLAP20(ReprMixin, SchemeInterface):
                 (2, 4),  # s1, ZZ1
             ]
             prods = [1, 1, 1, 1, 2, 2]
-            pic, pis = spk.sign(y, g, x, i, prods, n.to_bytes())
+            proof = spk.general_representation_sign(
+                y, g, x, i, prods, n.to_bytes(), manual=True
+            )
             ## Need to send (n, f, w, SS0, SS1, ff0, ff1, pi): prepare ad hoc message
             ret["status"] = "success"
             ret["n"] = n.to_b64()
@@ -241,13 +246,12 @@ class KLAP20(ReprMixin, SchemeInterface):
             ret["SS1"] = SS1.to_b64()
             ret["ff0"] = ff0.to_b64()
             ret["ff1"] = ff1.to_b64()
-            ret["pic"] = pic.to_b64()
-            ret["pis"] = json.dumps([p.to_b64() for p in pis])
+            ret["pi"] = proof.to_b64()
             ret["phase"] = phase + 1
         elif phase == 3:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
                 return ret
             # Min = v
             key.v = G1.from_b64(message["v"])
@@ -260,13 +264,13 @@ class KLAP20(ReprMixin, SchemeInterface):
                 ret["status"] = "success"
             else:
                 ret["status"] = "fail"
-                ret["message"] = "e1 != e4"
-                logger.error(ret["message"])
+                ret["message"] = "Invalid message content"
+                self._logger.debug("e1 != e4")
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
         return ret
 
     def sign(self, message, key):
@@ -279,9 +283,9 @@ class KLAP20(ReprMixin, SchemeInterface):
         sig.ww.set_object(key.w * r)
 
         ## Compute signature of knowledge of alpha
-        pic, pis = spk.dlog_G1_sign(sig.ww, sig.uu, key.alpha, message)
-        sig.c.set_object(pic)
-        sig.s.set_object(pis)
+        proof = spk.discrete_log_sign(sig.ww, sig.uu, key.alpha, message)
+        sig.pi.c.set_object(proof.c)
+        sig.pi.s.set_object(proof.s)
         return {
             "status": "success",
             "signature": sig.to_b64(),
@@ -292,7 +296,7 @@ class KLAP20(ReprMixin, SchemeInterface):
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
         ## Verify SPK
-        if spk.dlog_G1_verify(sig.ww, sig.uu, sig.c, sig.s, message):
+        if spk.discrete_log_verify(sig.ww, sig.uu, sig.pi, message):
             # e1 = e(vv,gg)
             e1 = GT.pairing(sig.vv, self.grpkey.gg)
             # e2 = e(uu,XX)
@@ -304,11 +308,11 @@ class KLAP20(ReprMixin, SchemeInterface):
             if e1 == e4:
                 ret["status"] = "success"
             else:
-                ret["message"] = "e1 != e4"
-                logger.error(ret["message"])
+                ret["message"] = "Invalid signature"
+                self._logger.debug("e1 != e4")
         else:
-            ret["message"] = "spk.dlog_G1_verify failed"
-            logger.error(ret["message"])
+            ret["message"] = "Invalid signature"
+            self._logger.debug("spk.dlog_G1_verify failed")
         return ret
 
     def open(self, signature):
@@ -326,24 +330,20 @@ class KLAP20(ReprMixin, SchemeInterface):
             if e1 == e2 and tau == e3:
                 ret["status"] = "success"
                 ret["id"] = mem_id
-                pic, pis = spk.sign1(
-                    ff, sig.uu, self.grpkey.g, e2, e3, sig.to_b64()
+                proof = spk.pairing_homomorphism_sign2(
+                    ff, sig.uu, self.grpkey.g, e2, e3, tau, sig.to_b64()
                 )
-                ret["proof"] = {
-                    "pic": pic.to_b64(),
-                    "pis": pis.to_b64(),
-                    "tau": tau.to_b64(),
-                }
+                ret["proof"] = proof.to_b64()
                 break
         return ret
 
     def open_verify(self, signature, proof):
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
-        pic = Fr.from_b64(proof["pic"])
-        pis = G2.from_b64(proof["pis"])
-        tau = GT.from_b64(proof["tau"])
+        proof_ = spk.PairingHomomorphismProof2.from_b64(proof)
         e2 = GT.pairing(sig.ww, self.grpkey.gg)
-        if spk.verify1(pic, pis, sig.uu, self.grpkey.g, e2, tau, sig.to_b64()):
+        if spk.pairing_homomorphism_verify2(
+            proof_, sig.uu, self.grpkey.g, e2, sig.to_b64()
+        ):
             ret["status"] = "success"
         return ret

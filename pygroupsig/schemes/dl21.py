@@ -1,16 +1,12 @@
 import hashlib
 import logging
 
-import pygroupsig.spk as spk
-from pygroupsig.helpers import B64Mixin, InfoMixin, ReprMixin
+import pygroupsig.utils.spk as spk
 from pygroupsig.interfaces import ContainerInterface, SchemeInterface
-from pygroupsig.pairings.mcl import G1, G2, GT, Fr
+from pygroupsig.utils.helpers import B64Mixin, InfoMixin, JoinMixin, ReprMixin
+from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
 _NAME = "dl21"
-_SEQ = 3
-_START = 0
-
-logger = logging.getLogger(__name__)
 
 
 class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
@@ -54,12 +50,13 @@ class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.AA = G1()
         self.A_ = G1()
         self.d = G1()
-        self.c = Fr()
-        self.s = []
+        self.pi = spk.GeneralRepresentationProof()
         self.nym = G1()
 
 
-class DL21(ReprMixin, SchemeInterface):
+class DL21(JoinMixin, ReprMixin, SchemeInterface):
+    _logger = logging.getLogger(__name__)
+
     def __init__(self):
         self.grpkey = GroupKey()
         self.mgrkey = ManagerKey()
@@ -92,7 +89,7 @@ class DL21(ReprMixin, SchemeInterface):
         else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
                 return ret
             phase = message["phase"]
             if phase == 2:
@@ -100,10 +97,9 @@ class DL21(ReprMixin, SchemeInterface):
                 ## Verify the proof
                 n = G1.from_b64(message["n"])
                 H = G1.from_b64(message["H"])
-                pic = Fr.from_b64(message["pic"])
-                pis = Fr.from_b64(message["pis"])
-                if spk.dlog_G1_verify(
-                    H, self.grpkey.h1, pic, pis, n.to_bytes()
+                proof = spk.DiscreteLogProof.from_b64(message["pi"])
+                if spk.discrete_log_verify(
+                    H, self.grpkey.h1, proof, n.to_bytes()
                 ):
                     ## Pick x and s at random from Z*_p
                     x = Fr.from_random()
@@ -123,20 +119,20 @@ class DL21(ReprMixin, SchemeInterface):
                     ret["A"] = A.to_b64()
                     ret["phase"] = phase + 1
                 else:
-                    ret["message"] = "spk.dlog_G1_verify failed"
-                    logger.error(ret["message"])
+                    ret["message"] = "Invalid message content"
+                    self._logger.debug("spk.dlog_G1_verify failed")
             else:
                 ret["message"] = (
                     f"Phase not supported for {self.__class__.__name__}"
                 )
-                logger.error(ret["message"])
+                self._logger.error(ret["message"])
         return ret
 
     def join_mem(self, message, key):
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
             return ret
         phase = message["phase"]
         if phase == 1:
@@ -150,7 +146,7 @@ class DL21(ReprMixin, SchemeInterface):
             key.H.set_object(self.grpkey.h1 * key.y)
 
             ## Compute the SPK
-            pic, pis = spk.dlog_G1_sign(
+            proof = spk.discrete_log_sign(
                 key.H, self.grpkey.h1, key.y, n.to_bytes()
             )
 
@@ -158,8 +154,7 @@ class DL21(ReprMixin, SchemeInterface):
             ret["status"] = "success"
             ret["n"] = n.to_b64()
             ret["H"] = key.H.to_b64()
-            ret["pic"] = pic.to_b64()
-            ret["pis"] = pis.to_b64()
+            ret["pi"] = proof.to_b64()
             ret["phase"] = phase + 1
         elif phase == 3:
             ## Second step by the member: Check correctness of computation
@@ -186,17 +181,17 @@ class DL21(ReprMixin, SchemeInterface):
                     ret["status"] = "success"
                 else:
                     ret["status"] = "fail"
-                    ret["message"] = "e4 != e3"
-                    logger.error(ret["message"])
+                    ret["message"] = "Invalid message content"
+                    self._logger.debug("e4 != e3")
             else:
                 ret["status"] = "fail"
-                ret["message"] = "key.A is zero"
-                logger.error(ret["message"])
+                ret["message"] = "Invalid message content"
+                self._logger.debug("key.A is zero")
         else:
             ret["message"] = (
                 f"Phase not supported for {self.__class__.__name__}"
             )
-            logger.error(ret["message"])
+            self._logger.error(ret["message"])
         return ret
 
     def sign(self, message, key, scope="def"):
@@ -206,6 +201,9 @@ class DL21(ReprMixin, SchemeInterface):
             "signature": sig.to_b64(),
         }
 
+    def _signature_factory(self):
+        return Signature
+
     def _common_sign(self, message, key, scope):
         message = str(message)
         scope = str(scope)
@@ -213,7 +211,7 @@ class DL21(ReprMixin, SchemeInterface):
         r1 = Fr.from_random()
         r2 = Fr.from_random()
 
-        sig = Signature()
+        sig = self._signature_factory()()
         # nym = Hash(scp)*y
         h = hashlib.sha256(scope.encode())
         hscp = G1.from_hash(h.digest())
@@ -255,16 +253,16 @@ class DL21(ReprMixin, SchemeInterface):
             (5, 4),  # h1^-y = (g[4],x[5])
         ]
         prods = [1, 2, 3]
-        pic, pis = spk.rep_sign(y, g, x, i, prods, message)
-        sig.c.set_object(pic)
-        sig.s.extend(pis)
+        proof = spk.general_representation_sign(y, g, x, i, prods, message)
+        sig.pi.c.set_object(proof.c)
+        sig.pi.s.extend(proof.s)
         return sig
 
     def verify(self, message, signature, scope="def"):
         message = str(message)
         scope = str(scope)
         ret = {"status": "fail"}
-        sig = Signature.from_b64(signature)
+        sig = self._signature_factory().from_b64(signature)
         ## AA must not be 1 (since we use additive notation for G1,
         ## it must not be 0)
         if not sig.AA.is_zero():
@@ -288,23 +286,25 @@ class DL21(ReprMixin, SchemeInterface):
                 ]
                 prods = [1, 2, 3]
                 ## Verify SPK
-                if spk.rep_verify(y, g, i, prods, sig.c, sig.s, message):
+                if spk.general_representation_verify(
+                    y, g, i, prods, sig.pi, message
+                ):
                     ret["status"] = "success"
                 else:
-                    ret["message"] = "spk.rep_verify failed"
-                    logger.error(ret["message"])
+                    ret["message"] = "Invalid signature"
+                    self._logger.debug("spk.rep_verify failed")
             else:
-                ret["message"] = "e1 != e2"
-                logger.error(ret["message"])
+                ret["message"] = "Invalid signature"
+                self._logger.debug("e1 != e2")
         else:
-            ret["message"] = "AA is zero"
-            logger.error(ret["message"])
+            ret["message"] = "Invalid signature"
+            self._logger.debug("AA is zero")
         return ret
 
     def identify(self, signature, key, scope="def"):
         scope = str(scope)
         ret = {"status": "fail"}
-        sig = Signature.from_b64(signature)
+        sig = self._signature_factory().from_b64(signature)
         ## Recompute nym
         h = hashlib.sha256()
         h.update(scope.encode())
@@ -334,29 +334,25 @@ class DL21(ReprMixin, SchemeInterface):
                 hscp += G1.from_hash(h.digest())
             else:
                 if ver_msg["status"] != "success":
-                    ret["message1"] = "signature verification failed"
-                    logger.error(ret["message1"])
+                    ret["message1"] = "Invalid messages/signatures"
+                    self._logger.debug("Signature verify failed")
                 if iden_msg["status"] != "success":
-                    ret["message2"] = "signature identify failed"
-                    logger.error(ret["message2"])
+                    ret["message2"] = "Invalid messages/signatures"
+                    self._logger.debug("Signature identify failed")
                 break
         else:
             # nym_ = hscp * y
             nym = hscp * key.y
             ## Do the SPK
-            pic, pis = spk.dlog_G1_sign(nym, hscp, key.y, message)
+            proof = spk.discrete_log_sign(nym, hscp, key.y, message)
             ret["status"] = "success"
-            ret["proof"] = {
-                "pic": pic.to_b64(),
-                "pis": pis.to_b64(),
-            }
+            ret["proof"] = proof.to_b64()
         return ret
 
     def link_verify(self, message, messages, signatures, proof, scope="def"):
         scope = str(scope)
         ret = {"status": "fail"}
-        pic = Fr.from_b64(proof["pic"])
-        pis = Fr.from_b64(proof["pis"])
+        proof_ = spk.DiscreteLogProof.from_b64(proof)
         hscp = G1()
         nym = G1()
         for msg, sig_b64 in zip(messages, signatures):
@@ -367,16 +363,16 @@ class DL21(ReprMixin, SchemeInterface):
                 ## "Accumulate" scp
                 hscp += G1.from_hash(h.digest())
                 ## "Accumulate" nym
-                sig = Signature.from_b64(sig_b64)
+                sig = self._signature_factory().from_b64(sig_b64)
                 nym += sig.nym
             else:
-                ret["message"] = "signature verification failed"
-                logger.error(ret["message"])
+                ret["message"] = "Invalid messages/signatures"
+                self._logger.debug("Signature verify failed")
                 break
         else:
-            if spk.dlog_G1_verify(nym, hscp, pic, pis, message):
+            if spk.discrete_log_verify(nym, hscp, proof_, message):
                 ret["status"] = "success"
             else:
-                ret["message"] = "spk.dlog_G1_verify failed"
-                logger.error(ret["message"])
+                ret["message"] = "Invalid proof"
+                self._logger.debug("spk.dlog_G1_verify failed")
         return ret
