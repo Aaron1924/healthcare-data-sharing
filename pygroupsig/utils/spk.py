@@ -46,9 +46,9 @@ class B64Mixin:
         ret.set_b64(s)
         return ret
 
-    def set_object(self, o):
-        for v in vars(o):
-            s_obj = getattr(o, v)
+    def set_object(self, y):
+        for v in vars(y):
+            s_obj = getattr(y, v)
             d_obj = getattr(self, v)
             if isinstance(s_obj, list):
                 d_obj.extend(s_obj)

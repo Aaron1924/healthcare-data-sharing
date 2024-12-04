@@ -1,6 +1,6 @@
 [tool.mypy]
 cache_dir = "/dev/null"
-#strict = true
+strict = true
 exclude = ["tests/"]
 
 [tool.ruff]

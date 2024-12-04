@@ -1,9 +1,9 @@
 import unittest
 from pathlib import Path
 
-import pygroupsig.pairings.utils as ut
+import pygroupsig.utils.constants as ct
 from pygroupsig import load_library
-from pygroupsig.pairings.mcl import G1, G2, GT, Fp, Fp2, Fr
+from pygroupsig.utils.mcl import G1, G2, GT, Fp, Fp2, Fr
 
 
 class FBaseTest(unittest.TestCase):
@@ -14,22 +14,34 @@ class FBaseTest(unittest.TestCase):
         self.assertEqual(cls.byte_size(), value)
 
     def _testStr(self, cls):
-        x = cls()
         s = "1234567890987654321"
-        x.set_str(s)
-        self.assertEqual(x.get_str(), s)
-
-    def _testInt(self, cls):
         x = cls()
-        i = 1234567890987654321
-        x.set_int(i)
-        y = cls()
-        y.set_str(str(i))
+        x.set_str(s)
+        y = cls.from_str(s)
+        self.assertEqual(x.get_str(), s)
         self.assertEqual(x.get_str(), y.get_str())
 
-    def _testIsZero(self, cls):
+    def _testBytes(self, cls):
+        x = cls.from_str("1234567890987654321")
+        x_b = x.to_bytes()
+        y = cls()
+        y.set_bytes(x_b)
+        z = cls.from_bytes(x_b)
+        self.assertEqual(x.get_str(), y.get_str())
+        self.assertEqual(x.get_str(), z.get_str())
+
+    def _testInt(self, cls):
+        i = 1234567890987654321
         x = cls()
-        fp2 = isinstance(x, Fp2)
+        x.set_int(i)
+        y = cls.from_int(i)
+        z = cls.from_str(str(i))
+        self.assertEqual(x.get_str(), y.get_str())
+        self.assertEqual(x.get_str(), z.get_str())
+
+    def _testIsZero(self, cls):
+        fp2 = cls == Fp2
+        x = cls()
         if fp2:
             x.d[0].set_int(0)
         else:
@@ -42,8 +54,8 @@ class FBaseTest(unittest.TestCase):
         self.assertIs(x.is_zero(), False)
 
     def _testIsOne(self, cls):
+        fp2 = cls == Fp2
         x = cls()
-        fp2 = isinstance(x, Fp2)
         if fp2:
             x.d[0].set_int(1)
         else:
@@ -56,9 +68,9 @@ class FBaseTest(unittest.TestCase):
         self.assertIs(x.is_one(), False)
 
     def _testIsEqual(self, cls):
+        fp2 = cls == Fp2
         x = cls()
         y = cls()
-        fp2 = isinstance(x, Fp2)
         if fp2:
             x.d[0].set_int(42)
             y.d[0].set_int(42)
@@ -79,10 +91,8 @@ class FBaseTest(unittest.TestCase):
         self.assertIs(y == x, False)
 
     def _testCmp(self, cls):
-        x = cls()
-        x.set_int(42)
-        y = cls()
-        y.set_int(41)
+        x = cls.from_int(42)
+        y = cls.from_int(41)
         self.assertEqual(x.cmp(y), 1)
         self.assertIs(x > y, True)
         self.assertIs(x >= y, True)
@@ -100,8 +110,7 @@ class FBaseTest(unittest.TestCase):
     def _testNeg(self, cls):
         x = cls()
         y = cls()
-        fp2 = isinstance(x, Fp2)
-        if fp2:
+        if cls == Fp2:
             x.d[0].set_int(42)
             y.d[0].set_int(-42)
         else:
@@ -109,8 +118,8 @@ class FBaseTest(unittest.TestCase):
             y.set_int(-42)
         x_n = -x
         self.assertIs(x == x_n, False)
-        x_p = -x_n
-        self.assertIs(x == x_p, True)
+        xx = -x_n
+        self.assertIs(x == xx, True)
         self.assertIs(x_n == y, True)
         y_n = -y
         self.assertIs(y_n == x, True)
@@ -119,8 +128,7 @@ class FBaseTest(unittest.TestCase):
         x = cls()
         y = cls()
         z = cls()
-        fp2 = isinstance(x, Fp2)
-        if fp2:
+        if cls == Fp2:
             x.d[0].set_int(6)
             y.d[0].set_int(7)
             z.d[0].set_int(42)
@@ -128,19 +136,18 @@ class FBaseTest(unittest.TestCase):
             x.set_int(6)
             y.set_int(7)
             z.set_int(42)
-        z_p = x.mul(y)
-        z_p2 = x * y
-        z2_p = y.mul(x)
-        z2_p2 = y * x
-        self.assertIs(z_p == z_p2 == z, True)
-        self.assertIs(z2_p == z2_p2 == z, True)
+        a = x.mul(y)
+        aa = x * y
+        self.assertIs(a == aa == z, True)
+        b = y.mul(x)
+        bb = y * x
+        self.assertIs(b == bb == z, True)
 
     def _testDiv(self, cls):
         x = cls()
         y = cls()
         z = cls()
-        fp2 = isinstance(x, Fp2)
-        if fp2:
+        if cls == Fp2:
             x.d[0].set_int(42)
             y.d[0].set_int(7)
             z.d[0].set_int(6)
@@ -148,16 +155,15 @@ class FBaseTest(unittest.TestCase):
             x.set_int(42)
             y.set_int(7)
             z.set_int(6)
-        z_p = x.div(y)
-        z_p2 = x / y
-        self.assertIs(z_p == z_p2 == z, True)
+        a = x.div(y)
+        aa = x / y
+        self.assertIs(a == aa == z, True)
 
     def _testAdd(self, cls):
         x = cls()
         y = cls()
         z = cls()
-        fp2 = isinstance(x, Fp2)
-        if fp2:
+        if cls == Fp2:
             x.d[0].set_int(6)
             y.d[0].set_int(36)
             z.d[0].set_int(42)
@@ -165,120 +171,114 @@ class FBaseTest(unittest.TestCase):
             x.set_int(6)
             y.set_int(36)
             z.set_int(42)
-        z_p = x.add(y)
-        z_p2 = x + y
-        z2_p = y.add(x)
-        z2_p2 = y + x
-        self.assertIs(z_p == z_p2 == z, True)
-        self.assertIs(z2_p == z2_p2 == z, True)
+        a = x.add(y)
+        aa = x + y
+        self.assertIs(a == aa == z, True)
+        b = y.add(x)
+        bb = y + x
+        self.assertIs(b == bb == z, True)
 
     def _testSub(self, cls):
         x = cls()
         y = cls()
         z = cls()
-        z2 = cls()
-        fp2 = isinstance(x, Fp2)
-        if fp2:
+        z_n = cls()
+        if cls == Fp2:
             x.d[0].set_int(42)
             y.d[0].set_int(6)
             z.d[0].set_int(36)
-            z2.d[0].set_int(-36)
+            z_n.d[0].set_int(-36)
         else:
             x.set_int(42)
             y.set_int(6)
             z.set_int(36)
-            z2.set_int(-36)
-        z_p = x.sub(y)
-        z_p2 = x - y
-        z2_p = y.sub(x)
-        z2_p2 = y - x
-        self.assertIs(z_p == z_p2 == z, True)
-        self.assertIs(z2_p == z2_p2 == z2, True)
+            z_n.set_int(-36)
+        a = x.sub(y)
+        aa = x - y
+        self.assertIs(a == aa == z, True)
+        b = y.sub(x)
+        bb = y - x
+        self.assertIs(b == bb == z_n, True)
 
     def _testInv(self, cls):
         one = cls()
         x = cls()
-        fp2 = isinstance(x, Fp2)
-        if fp2:
+        if cls == Fp2:
             one.d[0].set_int(1)
             x.d[0].set_int(42)
         else:
             one.set_int(1)
             x.set_int(42)
         x_i = x.inv()
-        x_i2 = ~x
-        pd = x * x_i
-        pd2 = x * x_i2
+        x_ii = ~x
+        self.assertIs(x_i == x_ii, True)
+        p = x * x_i
+        self.assertIs(p == one, True)
         x_p = ~x_i
-        self.assertIs(pd == pd2 == one, True)
         self.assertIs(x == x_p, True)
 
     def _testPow(self, cls):
-        x = cls()
-        x.set_int(2)
-        y = cls()
-        y.set_int(5)
-        z = cls()
-        z.set_int(32)
-        z_p = x.pow(y)
-        z_p2 = x**y
-        self.assertIs(z_p == z_p2 == z, True)
+        x = cls.from_int(2)
+        y = cls.from_int(5)
+        z = cls.from_int(32)
+        a = x.pow(y)
+        aa = x**y
+        self.assertIs(a == aa == z, True)
 
     def _testSetRandom(self, cls):
-        x = cls()
-        x.set_int(10)
+        x = cls.from_int(10)
         self.assertEqual(x.get_str(), "10")
         x.set_random()
         self.assertNotEqual(x.get_str(), "10")
+        y = cls.from_random()
+        self.assertEqual(y.is_zero(), False)
 
     def _testSerialization(self, cls):
         x = cls()
-        fp2 = isinstance(x, Fp2)
-        if fp2:
+        if cls == Fp2:
             x.d[0].set_int(42)
         else:
             x.set_int(42)
         x_b = x.to_bytes()
         y = cls()
         y.set_bytes(x_b)
-        y_p = cls.from_bytes(x_b)
-        self.assertIs(x == y == y_p, True)
+        z = cls.from_bytes(x_b)
+        self.assertIs(x == y == z, True)
 
     def _testSetHash(self, cls):
-        x = cls()
-        x.set_int(42)
+        x = cls.from_int(42)
         y = cls()
         y.set_hash("a1d0c6e83f027327d8461063f4ac58a6")
         self.assertIs(x == y, False)
+        z = cls.from_hash("a1d0c6e83f027327d8461063f4ac58a6")
+        self.assertIs(y == z, True)
         x.set_hash("a1d0c6e83f027327d8461063f4ac58a6")
         self.assertIs(x == y, True)
 
     def _testFile(self, cls):
         x = cls()
-        fp2 = isinstance(x, Fp2)
-        if fp2:
+        if cls == Fp2:
             x.d[0].set_int(42)
         else:
             x.set_int(42)
-        f = Path("/tmp/.test_pairings.txt")
+        f = Path("/tmp/.test_mcl.txt")
         x.to_file(f)
         y = cls()
         y.set_file(f)
-        y_p = cls.from_file(f)
-        self.assertIs(x == y == y_p, True)
+        z = cls.from_file(f)
+        self.assertIs(x == y == z, True)
 
     def _testB64(self, cls):
         x = cls()
-        fp2 = isinstance(x, Fp2)
-        if fp2:
+        if cls == Fp2:
             x.d[0].set_int(42)
         else:
             x.set_int(42)
         x_b64 = x.to_b64()
         y = cls()
         y.set_b64(x_b64)
-        y_p = cls.from_b64(x_b64)
-        self.assertIs(x == y == y_p, True)
+        z = cls.from_b64(x_b64)
+        self.assertIs(x == y == z, True)
 
 
 class TestFp(FBaseTest):
@@ -287,6 +287,9 @@ class TestFp(FBaseTest):
 
     def testStr(self):
         self._testStr(Fp)
+
+    def testBytes(self):
+        self._testBytes(Fp)
 
     def testInt(self):
         self._testInt(Fp)
@@ -346,6 +349,9 @@ class TestFr(FBaseTest):
 
     def testStr(self):
         self._testStr(Fr)
+
+    def testBytes(self):
+        self._testBytes(Fr)
 
     def testInt(self):
         self._testInt(Fr)
@@ -446,10 +452,10 @@ class GBaseTest(unittest.TestCase):
         self.h = (
             "f0c8dc42d5a51db0c326916d10392adbf76b14ae99d489ff3560611a97420eee"
         )
-        self.s = ut.BLS12_381_P
+        self.s = ct.BLS12_381_P
         self.v = "1 3719226684904596419579221578361625155541235735183967430228173297117758812288229752053408139708879506501457152802942 260918097660325786349299603372812253806953498958308283336009514870956832500285249250447899736364680533026929093718"
         if isinstance(self, TestG2):
-            self.s = ut.BLS12_381_Q
+            self.s = ct.BLS12_381_Q
             self.v = "1 835291197291119138835982130627849483202366689768919374128556270083673076425684408356112030969361574591025123607949 262446842239551949853427194215207084960530636993308253549525386344727618348891416626249682329755634097133131050377 1485374626780584277638246857402993053167420159545306011973894843376495696555900277040606767721288523043305649236038 3253563504197550909989288629072739120866164573027127387470195401209461645203269415741294914321252541506907241635197"
 
     def _testByteSize(self, cls, value):
@@ -458,6 +464,15 @@ class GBaseTest(unittest.TestCase):
     def _testStr(self, cls):
         x = cls.from_generator()
         self.assertEqual(x.get_str(), self.s)
+
+    def _testBytes(self, cls):
+        x = cls.from_generator()
+        x_b = x.to_bytes()
+        y = cls()
+        y.set_bytes(x_b)
+        z = cls.from_bytes(x_b)
+        self.assertEqual(x.get_str(), y.get_str())
+        self.assertEqual(x.get_str(), z.get_str())
 
     def _testIsZero(self, cls):
         x = cls.from_generator()
@@ -540,7 +555,7 @@ class GBaseTest(unittest.TestCase):
 
     def _testFile(self, cls):
         x = cls.from_generator()
-        f = Path("/tmp/.test_pairings.txt")
+        f = Path("/tmp/.test_mcl.txt")
         x.to_file(f)
         y = cls()
         y.set_file(f)
@@ -571,6 +586,9 @@ class TestG1(GBaseTest):
 
     def testStr(self):
         self._testStr(G1)
+
+    def testBytes(self):
+        self._testBytes(G1)
 
     def testIsZero(self):
         self._testIsZero(G1)
@@ -616,6 +634,9 @@ class TestG2(GBaseTest):
     def testStr(self):
         self._testStr(G2)
 
+    def testBytes(self):
+        self._testBytes(G2)
+
     def testIsZero(self):
         self._testIsZero(G2)
 
@@ -658,15 +679,29 @@ class TestGT(FBaseTest):
         self._testByteSize(GT, 576)
 
     def testStr(self):
-        x = GT()
         s = "1 2 3 4 5 6 7 8 9 10 11 12"
+        x = GT()
         x.set_str(s)
+        y = GT.from_str(s)
         self.assertEqual(x.get_str(), s)
+        self.assertEqual(y.get_str(), s)
+
+    def testBytes(self):
+        x = GT.from_str("1 2 3 4 5 6 7 8 9 10 11 12")
+        x_b = x.to_bytes()
+        y = GT()
+        y.set_bytes(x_b)
+        z = GT.from_bytes(x_b)
+        self.assertEqual(x.get_str(), y.get_str())
+        self.assertEqual(x.get_str(), z.get_str())
 
     def testInt(self):
+        i = 42
         x = GT()
-        x.set_int(42)
+        x.set_int(i)
+        y = GT.from_int(i)
         self.assertEqual(x.get_str(), "42 0 0 0 0 0 0 0 0 0 0 0")
+        self.assertEqual(x.get_str(), y.get_str())
 
     def testIsZero(self):
         self._testIsZero(GT)
@@ -693,14 +728,31 @@ class TestGT(FBaseTest):
         self._testSub(GT)
 
     def testInv(self):
-        # TODO
-        # self._testInv(GT)
-        pass
+        x = GT.from_int(42)
+        x_i = x.inv()
+        x_ii = ~x
+        self.assertIs(x_i == x_ii, True)
+        x_p = ~x_i
+        self.assertIs(x_p == x, True)
 
-    def testPow(self):
-        # TODO
-        # self._testPow(GT)
-        pass
+    def testPairingAndPow(self):
+        a = Fr.from_int(123)
+        b = Fr.from_int(456)
+        P = G1.from_hash(b"1")
+        Q = G2.from_hash(b"1")
+        aP = P * a
+        bQ = Q * b
+        e = GT.pairing(P, Q)
+        e1 = e**a
+        e2 = GT.pairing(aP, Q)
+        self.assertIs(e1 == e2, True)
+        e1 = e**b
+        e2 = GT.pairing(P, bQ)
+        self.assertIs(e1 == e2, True)
+        n = Fr.from_int(3)
+        e1 = e**n
+        e2 = e * e * e
+        self.assertIs(e1 == e2, True)
 
     def testSerialization(self):
         self._testSerialization(GT)
@@ -712,14 +764,20 @@ class TestGT(FBaseTest):
         self._testB64(GT)
 
     def testPowVec(self):
-        # TODO
-        # self._testPowVec(GT)
-        pass
-
-    def testPairing(self):
-        # TODO
-        # self._testPairing(GT)
-        pass
+        n = 3
+        e = (GT * n)()
+        s = (Fr * n)()
+        e[0].set_object(GT.pairing(G1.from_hash(b"1"), G2.from_hash(b"1")))
+        e[1].set_object(GT.pairing(G1.from_hash(b"2"), G2.from_hash(b"2")))
+        e[2].set_object(GT.pairing(G1.from_hash(b"3"), G2.from_hash(b"3")))
+        s[0].set_object(Fr.from_random())
+        s[1].set_object(Fr.from_random())
+        s[2].set_object(Fr.from_random())
+        E = GT.from_int(1)
+        for i in range(n):
+            E *= e[i] ** s[i]
+        EE = GT.pown(e, s)
+        self.assertIs(E == EE, True)
 
 
 if __name__ == "__main__":

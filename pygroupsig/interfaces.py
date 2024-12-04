@@ -10,14 +10,6 @@ class SchemeInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
-    def join_mem(self, message=None):
-        """
-        Functions of this type are executed by entities who want to be
-        included in a group. They run in coordination with the equivalent
-        functions run by managers (join_mgr).
-        """
-
-    @abstractmethod
     def join_mgr(self, message=None):
         """
         Functions of this type are executed by group managers. From a
@@ -27,7 +19,15 @@ class SchemeInterface(metaclass=ABCMeta):
         """
 
     @abstractmethod
-    def sign(self, message, key):
+    def join_mem(self, message, key):
+        """
+        Functions of this type are executed by entities who want to be
+        included in a group. They run in coordination with the equivalent
+        functions run by managers (join_mgr).
+        """
+
+    @abstractmethod
+    def sign(self, message, key, **kwargs):
         """
         Type of functions for signing messages.
         """

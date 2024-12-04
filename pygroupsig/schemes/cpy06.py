@@ -42,9 +42,8 @@ class ManagerKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
     def __init__(self):
         self.xi1 = Fr()  # Exponent for tracing signatures. \xi_1 \in_R Z^*_p
         self.xi2 = Fr()  # Exponent for tracing signatures. \xi_2 \in_R Z^*_p
-        self.gamma = (
-            Fr()
-        )  # Exponent for generating member keys. \gamma \in_R Z^*_p
+        # Exponent for generating member keys. \gamma \in_R Z^*_p
+        self.gamma = Fr()
 
 
 class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):

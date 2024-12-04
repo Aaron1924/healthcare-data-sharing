@@ -72,11 +72,6 @@ class B64Mixin:
         return ret
 
 
-class InfoLMixin:
-    def info(self):
-        return self._NAME, self._CTYPE
-
-
 class JoinMixin:
     def join_seq(self):
         return _SEQ

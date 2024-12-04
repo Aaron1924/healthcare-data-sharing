@@ -321,9 +321,11 @@ class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
         b = random.randint(0, 1)
         for mem_id, (SS0, SS1, ff0, ff1, tau) in self.gml.items():
             if b:
-                ff = ff1 + -(SS1 * self.mgrkey.z1)
+                aux = -(SS1 * self.mgrkey.z1)
+                ff = ff1 + aux
             else:
-                ff = ff0 + -(SS0 * self.mgrkey.z0)
+                aux = -(SS0 * self.mgrkey.z0)
+                ff = ff0 + aux
             e1 = GT.pairing(sig.uu, ff)
             e2 = GT.pairing(sig.ww, self.grpkey.gg)
             e3 = GT.pairing(self.grpkey.g, ff)

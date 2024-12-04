@@ -198,7 +198,7 @@ class StrMixin:
         return buf.value.decode()
 
 
-class HashEndianPrngCmpMixin:
+class HashRandomCmpMixin:
     def set_hash(self, s):
         if isinstance(s, str):
             s = bytes(bytearray.fromhex(s))
@@ -365,7 +365,19 @@ class IntMixin:
         return ret
 
 
-class GenPrngMixin:
+class GeneratorMixin:
+    def set_generator(self):
+        s = ct.BLS12_381_P
+        if isinstance(self, G2):
+            s = ct.BLS12_381_Q
+        self.set_str(s)
+
+    @classmethod
+    def from_generator(cls):
+        ret = cls()
+        ret.set_generator()
+        return ret
+
     def set_random(self):
         gen = self.__class__()
         gen.set_generator()
@@ -380,23 +392,9 @@ class GenPrngMixin:
         return ret
 
 
-class GeneratorMixin:
-    def set_generator(self):
-        s = ct.BLS12_381_P
-        if isinstance(self, G2):
-            s = ct.BLS12_381_Q
-        self.set_str(s)
-
-    @classmethod
-    def from_generator(cls):
-        ret = cls()
-        ret.set_generator()
-        return ret
-
-
 class Fp(
     StrMixin,
-    HashEndianPrngCmpMixin,
+    HashRandomCmpMixin,
     OneInvDivMixin,
     PowMixin,
     IntMixin,
@@ -407,7 +405,7 @@ class Fp(
 
 class Fr(
     StrMixin,
-    HashEndianPrngCmpMixin,
+    HashRandomCmpMixin,
     OneInvDivMixin,
     PowMixin,
     IntMixin,
@@ -426,24 +424,22 @@ class Fp2(OneInvDivMixin, Base):
 
 
 class G1(
-    GeneratorMixin,
     StrMixin,
     MulFrMixin,
     MulVecMixin,
     HashAndMapMixin,
-    GenPrngMixin,
+    GeneratorMixin,
     Base,
 ):
     _fields_ = [("x", Fp), ("y", Fp), ("z", Fp)]
 
 
 class G2(
-    GeneratorMixin,
     StrMixin,
     MulFrMixin,
     MulVecMixin,
     HashAndMapMixin,
-    GenPrngMixin,
+    GeneratorMixin,
     Base,
 ):
     _fields_ = [("x", Fp2), ("y", Fp2), ("z", Fp2)]
