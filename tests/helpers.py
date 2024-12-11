@@ -9,17 +9,21 @@ for scheme in SCHEMES:
 
 
 class SetUpMixin:
+    scheme: str
+
     def setUp(self):
         load_library()
         if self.scheme is None:
             raise ValueError("Missing scheme")
-        self.group = group(self.scheme)
+        self.group = group(self.scheme)()
         self.group.setup()
 
 
 class AddMemberMixin:
+    scheme: str
+
     def addMember(self):
-        memkey = key(self.scheme, "member")
+        memkey = key(self.scheme, "member")()
         msg2 = None
         seq = self.group.join_seq()
         for _ in range(0, seq + 1, 2):
@@ -28,9 +32,9 @@ class AddMemberMixin:
         return memkey
 
     def addMemberIsolated(self):
-        gs = group(self.scheme)
+        gs = group(self.scheme)()
         gs.setup()
-        memkey = key(self.scheme, "member")
+        memkey = key(self.scheme, "member")()
         msg2 = None
         seq = gs.join_seq()
         for _ in range(0, seq + 1, 2):
@@ -41,17 +45,19 @@ class AddMemberMixin:
 
 # TODO: Different group manager and members
 class TestBase(AddMemberMixin):
+    scheme: str
+
     def setUp(self):
         load_library()
         if self.scheme is None:
             raise ValueError("Missing scheme")
-        self.group = group(self.scheme)
+        self.group = group(self.scheme)()
 
     def test_1a_initialGroupState(self):
-        for v in vars(self.group.grpkey):
-            self.assertTrue(getattr(self.group.grpkey, v).is_zero())
-        for v in vars(self.group.mgrkey):
-            self.assertTrue(getattr(self.group.mgrkey, v).is_zero())
+        for v in vars(self.group.group_key):
+            self.assertTrue(getattr(self.group.group_key, v).is_zero())
+        for v in vars(self.group.manager_key):
+            self.assertTrue(getattr(self.group.manager_key, v).is_zero())
         if hasattr(self.group, "gml"):
             self.assertFalse(self.group.gml)
         if hasattr(self.group, "crl"):
@@ -59,13 +65,13 @@ class TestBase(AddMemberMixin):
 
     def test_1b_groupStateAfterSetup(self):
         self.group.setup()
-        for v in vars(self.group.grpkey):
-            self.assertFalse(getattr(self.group.grpkey, v).is_zero())
-        for v in vars(self.group.mgrkey):
-            self.assertFalse(getattr(self.group.mgrkey, v).is_zero())
+        for v in vars(self.group.group_key):
+            self.assertFalse(getattr(self.group.group_key, v).is_zero())
+        for v in vars(self.group.manager_key):
+            self.assertFalse(getattr(self.group.manager_key, v).is_zero())
 
     def test_1c_initialMemKeyState(self):
-        memkey = key(self.scheme, "member")
+        memkey = key(self.scheme, "member")()
         for v in vars(memkey):
             el = getattr(memkey, v)
             if isinstance(el, int):
@@ -77,7 +83,7 @@ class TestBase(AddMemberMixin):
 
     def test_1d_memKeyStateAfterSetup(self):
         self.group.setup()
-        memkey = key(self.scheme, "member")
+        memkey = key(self.scheme, "member")()
         msg2 = None
         seq = self.group.join_seq()
         for _ in range(0, seq + 1, 2):
@@ -263,7 +269,7 @@ class TestBlind(AddMemberMixin, SetUpMixin):
         sig1_msg = self.group.sign(text1, memkey)
         sig2_msg = self.group.sign(text2, memkey)
         blind1_msg = self.group.blind(text1, sig1_msg["signature"])
-        bkey = key(b64=blind1_msg["blind_key"])
+        bkey = key(self.scheme, "blind").from_b64(blind1_msg["blind_key"])
         blind2_msg = self.group.blind(
             text2, sig2_msg["signature"], blind_key=bkey
         )
@@ -280,7 +286,7 @@ class TestBlind(AddMemberMixin, SetUpMixin):
         sig1_msg = self.group.sign(text1, memkey)
         sig2_msg = self.group.sign(text2, memkey)
         blind1_msg = self.group.blind(text1, sig1_msg["signature"])
-        bkey = key(b64=blind1_msg["blind_key"])
+        bkey = key(self.scheme, "blind").from_b64(blind1_msg["blind_key"])
         blind2_msg = self.group.blind(
             text2, sig2_msg["signature"], blind_key=bkey
         )
@@ -304,7 +310,7 @@ class TestBlind(AddMemberMixin, SetUpMixin):
         sig1_msg = self.group.sign(text1, memkey1)
         sig2_msg = self.group.sign(text2, memkey2)
         blind1_msg = self.group.blind(text1, sig1_msg["signature"])
-        bkey = key(b64=blind1_msg["blind_key"])
+        bkey = key(self.scheme, "blind").from_b64(blind1_msg["blind_key"])
         blind2_msg = self.group.blind(
             text2, sig2_msg["signature"], blind_key=bkey
         )
@@ -326,7 +332,7 @@ class TestBlind(AddMemberMixin, SetUpMixin):
         sig1_msg = self.group.sign(text1, memkey)
         sig2_msg = self.group.sign(text2, memkey)
         blind1_msg = self.group.blind(text1, sig1_msg["signature"])
-        bkey = key(b64=blind1_msg["blind_key"])
+        bkey = key(self.scheme, "blind").from_b64(blind1_msg["blind_key"])
         blind2_msg = self.group.blind(
             text2, sig2_msg["signature"], blind_key=bkey
         )
@@ -566,39 +572,39 @@ class TestLinkSeq(AddMemberMixin, SetUpMixin):
 
 class TestBaseExportImport(AddMemberMixin, SetUpMixin):
     def test_4a_exportImportGroupKey(self):
-        grpkey_b64 = self.group.grpkey.to_b64()
-        grpkey1 = key(self.scheme, "group")
+        grpkey_b64 = self.group.group_key.to_b64()
+        grpkey1 = key(self.scheme, "group")()
         grpkey1.set_b64(grpkey_b64)
-        self.assertEqual(str(grpkey1), str(self.group.grpkey))
-        grpkey2 = key(b64=grpkey_b64)
-        self.assertEqual(str(grpkey2), str(self.group.grpkey))
+        self.assertEqual(str(grpkey1), str(self.group.group_key))
+        grpkey2 = key(self.scheme, "group").from_b64(grpkey_b64)
+        self.assertEqual(str(grpkey2), str(self.group.group_key))
 
     def test_4b_exportImportManagerKey(self):
-        mgrkey_b64 = self.group.mgrkey.to_b64()
-        mgrkey1 = key(self.scheme, "manager")
+        mgrkey_b64 = self.group.manager_key.to_b64()
+        mgrkey1 = key(self.scheme, "manager")()
         mgrkey1.set_b64(mgrkey_b64)
-        self.assertEqual(str(mgrkey1), str(self.group.mgrkey))
-        mgrkey2 = key(b64=mgrkey_b64)
-        self.assertEqual(str(mgrkey2), str(self.group.mgrkey))
+        self.assertEqual(str(mgrkey1), str(self.group.manager_key))
+        mgrkey2 = key(self.scheme, "manager").from_b64(mgrkey_b64)
+        self.assertEqual(str(mgrkey2), str(self.group.manager_key))
 
     def test_4c_exportImportMemberKey(self):
         memkey = self.addMember()
         memkey_b64 = memkey.to_b64()
-        memkey1 = key(self.scheme, "member")
+        memkey1 = key(self.scheme, "member")()
         memkey1.set_b64(memkey_b64)
         self.assertEqual(str(memkey1), str(memkey))
-        memkey2 = key(b64=memkey_b64)
+        memkey2 = key(self.scheme, "member").from_b64(memkey_b64)
         self.assertEqual(str(memkey2), str(memkey))
 
     def test_4d_exportImportSignature(self):
         memkey = self.addMember()
         text = "Hello world!"
         sig_msg = self.group.sign(text, memkey)
-        sig1 = signature(self.scheme)
+        sig1 = signature(self.scheme)()
         sig1.set_b64(sig_msg["signature"])
         ver1_msg = self.group.verify(text, sig1.to_b64())
         self.assertEqual(ver1_msg["status"], "success")
-        sig2 = signature(b64=sig_msg["signature"])
+        sig2 = signature(self.scheme).from_b64(sig_msg["signature"])
         ver2_msg = self.group.verify(text, sig2.to_b64())
         self.assertEqual(ver2_msg["status"], "success")
 
@@ -639,10 +645,10 @@ class TestBlindExportImport:
     def test_4f_exportImportBlindKey(self):
         from pygroupsig.schemes.gl19 import BlindKey
 
-        blindkey = BlindKey.from_random(self.group.grpkey)
+        blindkey = BlindKey.from_random(self.group.group_key)
         blindkey_b64 = blindkey.to_b64()
-        blindkey1 = key(self.scheme, "blind")
+        blindkey1 = key(self.scheme, "blind")()
         blindkey1.set_b64(blindkey_b64)
         self.assertEqual(str(blindkey1), str(blindkey))
-        blindkey2 = key(b64=blindkey_b64)
+        blindkey2 = key(self.scheme, "blind").from_b64(blindkey_b64)
         self.assertEqual(str(blindkey2), str(blindkey))

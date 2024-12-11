@@ -1,26 +1,49 @@
 import hashlib
 import logging
+from typing import Any
 
 import pygroupsig.utils.spk as spk
-from pygroupsig.interfaces import ContainerInterface, SchemeInterface
+from pygroupsig.interfaces import Container, Scheme
 from pygroupsig.utils.helpers import (
     CRL,
     GML,
     B64Mixin,
     InfoMixin,
     JoinMixin,
+    MetadataGroupKeyMixin,
+    MetadataManagerKeyMixin,
+    MetadataMemberKeyMixin,
+    MetadataSignatureMixin,
     ReprMixin,
 )
 from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
-_NAME = "cpy06"
+
+class MetadataMixin:
+    _name = "cpy06"
 
 
-class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "group"
+class GroupKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataGroupKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    q: G1
+    r: G2
+    w: G2
+    x: G1
+    y: G1
+    z: G1
+    e1: GT
+    e2: GT
+    e3: GT
+    e4: GT
+    e5: GT
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.q = G1()  # Q \in_R G1
         self.r = G2()  # R = g2^\gamma; where g2 is G2's generator
         self.w = G2()  # W \in_R G2 \setminus 1
@@ -35,32 +58,65 @@ class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.e5 = GT()  # e5 = e(q,g2). Used in verify
 
 
-class ManagerKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "manager"
+class ManagerKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataManagerKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    xi1: Fr
+    xi2: Fr
+    gamma: Fr
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.xi1 = Fr()  # Exponent for tracing signatures. \xi_1 \in_R Z^*_p
         self.xi2 = Fr()  # Exponent for tracing signatures. \xi_2 \in_R Z^*_p
         # Exponent for generating member keys. \gamma \in_R Z^*_p
         self.gamma = Fr()
 
 
-class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "member"
+class MemberKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataMemberKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    x: Fr
+    t: Fr
+    A: G1
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.x = Fr()  # x \in_R Z^*_p (non-adaptively chosen by member)
         self.t = Fr()  # t \in_R Z^*_p (chosen by manager)
         self.A = G1()  # A = (q*g_1^x)^(1/t+\gamma)
 
 
-class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "signature"
+class Signature(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataSignatureMixin,
+    MetadataMixin,
+    Container,
+):
+    T1: G1
+    T2: G1
+    T3: G1
+    T4: G2
+    T5: GT
+    c: Fr
+    sr1: Fr
+    sr2: Fr
+    sd1: Fr
+    sd2: Fr
+    sx: Fr
+    st: Fr
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.T1 = G1()
         self.T2 = G1()
         self.T3 = G1()
@@ -75,53 +131,62 @@ class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.st = Fr()
 
 
-class CPY06(JoinMixin, ReprMixin, SchemeInterface):
+class Group(
+    JoinMixin, ReprMixin, MetadataMixin, Scheme[GroupKey, ManagerKey, MemberKey]
+):
     _logger = logging.getLogger(__name__)
 
-    def __init__(self):
-        self.grpkey = GroupKey()
-        self.mgrkey = ManagerKey()
+    _g1: G1
+    _g2: G2
+    gml: GML
+    crl: CRL
+
+    def __init__(self) -> None:
+        self.group_key = GroupKey()
+        self.manager_key = ManagerKey()
         self._g1 = G1.from_generator()
         self._g2 = G2.from_generator()
         self.gml = GML()
         self.crl = CRL()
 
-    def setup(self):
+    def setup(self) -> None:
         # \xi_1 \in_R Z^*_p
-        self.mgrkey.xi1.set_random()
+        self.manager_key.xi1.set_random()
         # \xi_2 \in_R Z^*_p
-        self.mgrkey.xi2.set_random()
+        self.manager_key.xi2.set_random()
         # \gamma \in_R Z^*_p
-        self.mgrkey.gamma.set_random()
+        self.manager_key.gamma.set_random()
 
         ## Create group public key
         # Q \in_R G1
-        self.grpkey.q.set_random()
+        self.group_key.q.set_random()
         # R = g2^\gamma
-        self.grpkey.r.set_object(self._g2 * self.mgrkey.gamma)
+        self.group_key.r.set_object(self._g2 * self.manager_key.gamma)
         # W \in_R G2 \setminus 1
-        self.grpkey.w.set_random()
+        self.group_key.w.set_random()
         # Z \in_R G1 \setminus 1
-        while self.grpkey.z.is_zero():
-            self.grpkey.z.set_random()
+        while self.group_key.z.is_zero():
+            self.group_key.z.set_random()
         # X = Z*(xi_1**-1)
-        self.grpkey.x.set_object(self.grpkey.z * ~self.mgrkey.xi1)
+        self.group_key.x.set_object(self.group_key.z * ~self.manager_key.xi1)
         # Y = Z*(xi_2**-1)
-        self.grpkey.y.set_object(self.grpkey.z * ~self.mgrkey.xi2)
+        self.group_key.y.set_object(self.group_key.z * ~self.manager_key.xi2)
 
         ## For computation optimizations
         # e1 = e(g1, W)
-        self.grpkey.e1.set_object(GT.pairing(self._g1, self.grpkey.w))
+        self.group_key.e1.set_object(GT.pairing(self._g1, self.group_key.w))
         # e2 = e(z,g2)
-        self.grpkey.e2.set_object(GT.pairing(self.grpkey.z, self._g2))
+        self.group_key.e2.set_object(GT.pairing(self.group_key.z, self._g2))
         # e3 = e(z,r)
-        self.grpkey.e3.set_object(GT.pairing(self.grpkey.z, self.grpkey.r))
+        self.group_key.e3.set_object(
+            GT.pairing(self.group_key.z, self.group_key.r)
+        )
         # e4 = e(g1,g2)
-        self.grpkey.e4.set_object(GT.pairing(self._g1, self._g2))
+        self.group_key.e4.set_object(GT.pairing(self._g1, self._g2))
         # e5 = e(q,g2)
-        self.grpkey.e5.set_object(GT.pairing(self.grpkey.q, self._g2))
+        self.group_key.e5.set_object(GT.pairing(self.group_key.q, self._g2))
 
-    def join_mgr(self, message=None):
+    def join_mgr(self, message: dict[str, Any] | None = None) -> dict[str, Any]:
         ret = {"status": "error"}
         if message is None:
             ## Generate random u, v from Z^*_p
@@ -132,7 +197,7 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
             ret["status"] = "success"
             ret["u"] = u.to_b64()
             ret["v"] = v.to_b64()
-            ret["phase"] = 1
+            ret["phase"] = 1  # type: ignore
         else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
@@ -145,7 +210,7 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
                 pi = G1.from_b64(message["pi"])
                 proof = spk.GeneralRepresentationProof.from_b64(message["spk"])
                 Y = [pi, pi]
-                G = [self._g1, I_, self.grpkey.q]
+                G = [self._g1, I_, self.group_key.q]
                 i = [
                     (0, 0),  # x*g1 (g[0],x[0])
                     (1, 0),  # v*g1 (g[0],x[1])
@@ -160,7 +225,7 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
                     # t \in_R Z^*_p
                     t = Fr.from_random()
                     # A = (pi+q) * ((gamma+t)**-1)
-                    A = (pi + self.grpkey.q) * ~(self.mgrkey.gamma + t)
+                    A = (pi + self.group_key.q) * ~(self.manager_key.gamma + t)
 
                     ## Update the gml
                     h = hashlib.sha256()
@@ -179,12 +244,14 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
                     self._logger.debug("spk.rep_verify failed")
             else:
                 ret["message"] = (
-                    f"Phase not supported for {self.__class__.__name__}"
+                    f"Phase not supported for {self.__class__.__name__}{self._name.upper()}"
                 )
                 self._logger.error(ret["message"])
         return ret
 
-    def join_mem(self, message, key):
+    def join_mem(
+        self, message: dict[str, Any], member_key: MemberKey
+    ) -> dict[str, Any]:
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
@@ -204,25 +271,25 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
             # I = yG1 + rQ
             e = (G1 * 2)()
             e[0].set_object(self._g1)
-            e[1].set_object(self.grpkey.q)
+            e[1].set_object(self.group_key.q)
             s = (Fr * 2)()
             s[0].set_object(y)
             s[1].set_object(r)
             I_ = G1.muln(e, s)
 
             ## memkey->x = u*memkey->y + v
-            key.x.set_object((u * y) + v)
+            member_key.x.set_object((u * y) + v)
 
             ## pi = G1*xi
-            pi = self._g1 * key.x
+            pi = self._g1 * member_key.x
 
             ## rr = -r' = -u*r
             rr = -(u * r)
 
             ## We'll be signing pi in the SPK
             Y = [pi, pi]
-            G = [self._g1, I_, self.grpkey.q]
-            x = [key.x, v, u, rr]
+            G = [self._g1, I_, self.group_key.q]
+            x = [member_key.x, v, u, rr]
             i = [
                 (0, 0),  # x*g1 (g[0],x[0])
                 (1, 0),  # v*g1 (g[0],x[1])
@@ -243,15 +310,15 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
             ## Import partial key from message
             t_ = Fr.from_b64(message["t"])
             A_ = G1.from_b64(message["A"])
-            aux_g2 = (self._g2 * t_) + self.grpkey.r
-            aux_g1 = (self._g1 * key.x) + self.grpkey.q
+            aux_g2 = (self._g2 * t_) + self.group_key.r
+            aux_g1 = (self._g1 * member_key.x) + self.group_key.q
 
             aux_gt1 = GT.pairing(A_, aux_g2)
             aux_gt2 = GT.pairing(aux_g1, self._g2)
             if aux_gt1 == aux_gt2:
                 ## All good: transfer all data to memkey
-                key.t.set_object(t_)
-                key.A.set_object(A_)
+                member_key.t.set_object(t_)
+                member_key.A.set_object(A_)
                 ret["status"] = "success"
             else:
                 ret["status"] = "fail"
@@ -259,12 +326,12 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
                 self._logger.debug("aux_gt1 != aux_gt2")
         else:
             ret["message"] = (
-                f"Phase not supported for {self.__class__.__name__}"
+                f"Phase not supported for {self.__class__.__name__}{self._name.upper()}"
             )
             self._logger.error(ret["message"])
         return ret
 
-    def sign(self, message, key):
+    def sign(self, message: str, member_key: MemberKey) -> dict[str, Any]:
         message = str(message)
 
         # r1,r2,r3 \in_R Z_p
@@ -272,22 +339,22 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
         r2 = Fr.from_random()
         r3 = Fr.from_random()
         # d1 = t*r1
-        d1 = key.t * r1
+        d1 = member_key.t * r1
         # d2 = t*r2
-        d2 = key.t * r2
+        d2 = member_key.t * r2
 
         sig = Signature()
         # T1 = X*r1
-        sig.T1.set_object(self.grpkey.x * r1)
+        sig.T1.set_object(self.group_key.x * r1)
         # T2 = Y*r2
-        sig.T2.set_object(self.grpkey.y * r2)
+        sig.T2.set_object(self.group_key.y * r2)
         # T3 = A + Z*(r1+r2)
-        sig.T3.set_object(key.A + (self.grpkey.z * (r1 + r2)))
+        sig.T3.set_object(member_key.A + (self.group_key.z * (r1 + r2)))
         # T4 = W*r3
-        sig.T4.set_object(self.grpkey.w * r3)
+        sig.T4.set_object(self.group_key.w * r3)
         ## e(...) precalculated in setup
         # T5 = e(g1, T4)**x = e(g1, W)**(r3*x)
-        sig.T5.set_object(self.grpkey.e1 ** (r3 * key.x))
+        sig.T5.set_object(self.group_key.e1 ** (r3 * member_key.x))
 
         # br1, br2,bd1,bd2,bt,bx \in_R Z_p
         br1 = Fr.from_random()
@@ -298,13 +365,13 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
         bx = Fr.from_random()
 
         # B1 = X*br1
-        B1 = self.grpkey.x * br1
+        B1 = self.group_key.x * br1
         # B2 = Y*br2
-        B2 = self.grpkey.y * br2
+        B2 = self.group_key.y * br2
         # B3 = T1*bt - X*bd1
-        B3 = (sig.T1 * bt) - (self.grpkey.x * bd1)
+        B3 = (sig.T1 * bt) - (self.group_key.x * bd1)
         # B4 = T2*bt - Y*bd2
-        B4 = (sig.T2 * bt) - (self.grpkey.y * bd2)
+        B4 = (sig.T2 * bt) - (self.group_key.y * bd2)
         # B5 = e(g1,T4)^bx
         B5 = GT.pairing(self._g1, sig.T4) ** bx
         # B6 = e(T3,g2)^bt * e(z,g2)^(-bd1-bd2) * e(z,r)^(-br1-br2) * e(g1,g2)^(-bx)
@@ -312,9 +379,9 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
 
         ## aux_e: the rest (with the help of the optimizations is easier...)
         e = (GT * 3)()
-        e[0].set_object(self.grpkey.e2)
-        e[1].set_object(self.grpkey.e3)
-        e[2].set_object(self.grpkey.e4)
+        e[0].set_object(self.group_key.e2)
+        e[1].set_object(self.group_key.e3)
+        e[2].set_object(self.group_key.e4)
         s = (Fr * 3)()
         s[0].set_object((-bd1) - bd2)
         s[1].set_object((-br1) - br2)
@@ -347,36 +414,36 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
         # sd2 = bd2 + c*d2
         sig.sd2.set_object(bd2 + (sig.c * d2))
         # sx = bx + c*x
-        sig.sx.set_object(bx + (sig.c * key.x))
+        sig.sx.set_object(bx + (sig.c * member_key.x))
         # st = bt + c*t
-        sig.st.set_object(bt + (sig.c * key.t))
+        sig.st.set_object(bt + (sig.c * member_key.t))
         return {
             "status": "success",
             "signature": sig.to_b64(),
         }
 
-    def verify(self, message, signature):
+    def verify(self, message: str, signature: str) -> dict[str, Any]:
         message = str(message)
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
 
         ## Re-derive B1, B2, B3, B4, B5 and B6 from the signature
         # B1 = X*sr1 - T1*c
-        B1 = (self.grpkey.x * sig.sr1) - (sig.T1 * sig.c)
+        B1 = (self.group_key.x * sig.sr1) - (sig.T1 * sig.c)
         # B2 = X*sr2 - T2*c
-        B2 = (self.grpkey.y * sig.sr2) - (sig.T2 * sig.c)
+        B2 = (self.group_key.y * sig.sr2) - (sig.T2 * sig.c)
         # B3 = T1*st - X*sd1
-        B3 = (sig.T1 * sig.st) - (self.grpkey.x * sig.sd1)
+        B3 = (sig.T1 * sig.st) - (self.group_key.x * sig.sd1)
         # B4 = T2*st - Y*sd2
-        B4 = (sig.T2 * sig.st) - (self.grpkey.y * sig.sd2)
+        B4 = (sig.T2 * sig.st) - (self.group_key.y * sig.sd2)
         # B5 = e(g1,T4)**sx * T5**-c
         B5 = ((GT.pairing(self._g1, sig.T4)) ** sig.sx) * ~(sig.T5**sig.c)
         # B6 = e(T3,g2)^st * e(z,g2)^(-sd1-sd2) * e(z,r)^(-sr1-sr2) * e(g1,g2)^(-sx) * ( e(T3,r)/e(q,g2) )^c
         # aux_e = e(z,g2)^(-sd1-sd2) * e(z,r)^(-sr1-sr2) * e(g1,g2)^(-sx)
         e = (GT * 3)()
-        e[0].set_object(self.grpkey.e2)
-        e[1].set_object(self.grpkey.e3)
-        e[2].set_object(self.grpkey.e4)
+        e[0].set_object(self.group_key.e2)
+        e[1].set_object(self.group_key.e3)
+        e[2].set_object(self.group_key.e4)
         s = (Fr * 3)()
         s[0].set_object((-sig.sd1) - sig.sd2)
         s[1].set_object((-sig.sr1) - sig.sr2)
@@ -384,7 +451,9 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
         aux_e = GT.pown(e, s)
 
         # aux_GT = (e(T3,r) / e(q,g2))**c
-        aux_GT = ((GT.pairing(sig.T3, self.grpkey.r)) / self.grpkey.e5) ** sig.c
+        aux_GT = (
+            (GT.pairing(sig.T3, self.group_key.r)) / self.group_key.e5
+        ) ** sig.c
 
         # B6 = e(T3,g2)^st * aux_e * aux_GT
         B6 = (GT.pairing(sig.T3, self._g2)) ** sig.st * aux_e * aux_GT
@@ -413,7 +482,7 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
             self._logger.debug("c != sig.c")
         return ret
 
-    def open(self, signature):
+    def open(self, signature: str) -> dict[str, Any]:
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
         ## Recover the signer's A as: A = T3-(T1*xi1 + T2*xi2)
@@ -422,8 +491,8 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
         e[0].set_object(sig.T1)
         e[1].set_object(sig.T2)
         s = (Fr * 2)()
-        s[0].set_object(self.mgrkey.xi1)
-        s[1].set_object(self.mgrkey.xi2)
+        s[0].set_object(self.manager_key.xi1)
+        s[1].set_object(self.manager_key.xi2)
         A = G1.muln(e, s)
         # A = T3-A
         A = sig.T3 - A
@@ -434,25 +503,27 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
                 break
         return ret
 
-    def reveal(self, mem_id):
+    def reveal(self, member_id: str) -> dict[str, Any]:
         ret = {"status": "fail"}
-        if mem_id in self.gml:
+        if member_id in self.gml:
             ret["status"] = "success"
-            self.crl[mem_id] = self.gml[mem_id]
+            self.crl[member_id] = self.gml[member_id]
         return ret
 
-    def trace(self, signature):
+    def trace(self, signature: str) -> dict[str, Any]:
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
         for _, (_, trace_trap) in self.crl.items():
             e = GT.pairing(trace_trap, sig.T4)
             if e == sig.T5:
                 ret["status"] = "success"
-                ret["revoked"] = True
+                ret["revoked"] = True  # type: ignore
                 break
         return ret
 
-    def prove_equality(self, signatures, key):
+    def prove_equality(
+        self, signatures: list[str], member_key: MemberKey
+    ) -> dict[str, Any]:
         ## Initialize the hashing environment
         h = hashlib.sha256()
         ## Get random r
@@ -481,13 +552,15 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
         ## (e(g1,T4)^r)[n] || (e(g1,T4))[n] )
         proof.c.set_hash(h.digest())
         ## (3) To end, get s = r - c*x
-        proof.s.set_object(r + (proof.c * key.x))
+        proof.s.set_object(r + (proof.c * member_key.x))
         return {
             "status": "success",
             "proof": proof.to_b64(),
         }
 
-    def prove_equality_verify(self, signatures, proof):
+    def prove_equality_verify(
+        self, signatures: list[str], proof: str
+    ) -> dict[str, Any]:
         ret = {"status": "fail"}
         ## Initialize the hashing environment
         h = hashlib.sha256()
@@ -516,12 +589,12 @@ class CPY06(JoinMixin, ReprMixin, SchemeInterface):
             self._logger.debug("c != proof_.c")
         return ret
 
-    def claim(self, signature, key):
+    def claim(self, signature: str, member_key: MemberKey) -> dict[str, Any]:
         ## A claim is just similar to proving "equality" of N sigature, but just
         ## for 1 signature
-        return self.prove_equality([signature], key)
+        return self.prove_equality([signature], member_key)
 
-    def claim_verify(self, signature, proof):
+    def claim_verify(self, signature: str, proof: str) -> dict[str, Any]:
         ## A claim verification is just similar to proving "equality verification" of N sigature, but just
         ## for 1 signature
         return self.prove_equality_verify([signature], proof)

@@ -1,80 +1,123 @@
 import hashlib
 import logging
+from typing import Any
 
 import pygroupsig.utils.spk as spk
-from pygroupsig.interfaces import ContainerInterface, SchemeInterface
+from pygroupsig.interfaces import Container, Scheme
 from pygroupsig.utils.helpers import (
     GML,
     B64Mixin,
     InfoMixin,
     JoinMixin,
+    MetadataGroupKeyMixin,
+    MetadataManagerKeyMixin,
+    MetadataMemberKeyMixin,
+    MetadataSignatureMixin,
     ReprMixin,
 )
 from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
-_NAME = "ps16"
+
+class MetadataMixin:
+    _name = "ps16"
 
 
-class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "group"
+class GroupKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataGroupKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    g: G1
+    gg: G2
+    X: G2
+    Y: G2
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.g = G1()  # Random generator of G1
         self.gg = G2()  # Random generator of G2
         self.X = G2()  # gg^x (x is part of mgrkey)
         self.Y = G2()  # gg^y (y is part of mgrkey)
 
 
-class ManagerKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "manager"
+class ManagerKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataManagerKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    x: Fr
+    y: Fr
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.x = Fr()
         self.y = Fr()
 
 
-class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "member"
+class MemberKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataMemberKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    sk: Fr
+    sigma1: G1
+    sigma2: G1
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.sk = Fr()
         self.sigma1 = G1()
         self.sigma2 = G1()
 
 
-class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "signature"
+class Signature(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataSignatureMixin,
+    MetadataMixin,
+    Container,
+):
+    sigma1: G1
+    sigma2: G1
+    pi: spk.DiscreteLogProof
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.sigma1 = G1()
         self.sigma2 = G1()
         self.pi = spk.DiscreteLogProof()
 
 
-class PS16(JoinMixin, ReprMixin, SchemeInterface):
+class Group(
+    JoinMixin, ReprMixin, MetadataMixin, Scheme[GroupKey, ManagerKey, MemberKey]
+):
     _logger = logging.getLogger(__name__)
 
-    def __init__(self):
-        self.grpkey = GroupKey()
-        self.mgrkey = ManagerKey()
+    gml: GML
+
+    def __init__(self) -> None:
+        self.group_key = GroupKey()
+        self.manager_key = ManagerKey()
         self.gml = GML()
 
-    def setup(self):
+    def setup(self) -> None:
         ## Set manager key
-        self.mgrkey.x.set_random()
-        self.mgrkey.y.set_random()
+        self.manager_key.x.set_random()
+        self.manager_key.y.set_random()
 
         ## Set group key
-        self.grpkey.g.set_random()
-        self.grpkey.gg.set_random()
-        self.grpkey.X.set_object(self.grpkey.gg * self.mgrkey.x)
-        self.grpkey.Y.set_object(self.grpkey.gg * self.mgrkey.y)
+        self.group_key.g.set_random()
+        self.group_key.gg.set_random()
+        self.group_key.X.set_object(self.group_key.gg * self.manager_key.x)
+        self.group_key.Y.set_object(self.group_key.gg * self.manager_key.y)
 
-    def join_mgr(self, message=None):
+    def join_mgr(self, message: dict[str, Any] | None = None) -> dict[str, Any]:
         ret = {"status": "error"}
         if message is None:
             ## Send a random element to the member, the member should send it back
@@ -82,7 +125,7 @@ class PS16(JoinMixin, ReprMixin, SchemeInterface):
             n = G1.from_random()
             ret["status"] = "success"
             ret["n"] = n.to_b64()
-            ret["phase"] = 1
+            ret["phase"] = 1  # type: ignore
         else:
             if not isinstance(message, dict):
                 ret["message"] = "Invalid message type. Expected dict"
@@ -97,18 +140,18 @@ class PS16(JoinMixin, ReprMixin, SchemeInterface):
                 proof = spk.DiscreteLogProof.from_b64(message["pi"])
 
                 if spk.discrete_log_verify(
-                    tau, self.grpkey.g, proof, n.to_bytes()
+                    tau, self.group_key.g, proof, n.to_bytes()
                 ):
-                    e1 = GT.pairing(tau, self.grpkey.Y)
-                    e2 = GT.pairing(self.grpkey.g, ttau)
+                    e1 = GT.pairing(tau, self.group_key.Y)
+                    e2 = GT.pairing(self.group_key.g, ttau)
 
                     if e1 == e2:
                         ## Compute the partial member key
                         u = Fr.from_random()
-                        sigma1 = self.grpkey.g * u
+                        sigma1 = self.group_key.g * u
                         sigma2 = (
-                            (tau * self.mgrkey.y)
-                            + (self.grpkey.g * self.mgrkey.x)
+                            (tau * self.manager_key.y)
+                            + (self.group_key.g * self.manager_key.x)
                         ) * u
 
                         ## Add the tuple (i,tau,ttau) to the GML
@@ -132,12 +175,14 @@ class PS16(JoinMixin, ReprMixin, SchemeInterface):
                     self._logger.debug("spk.dlog_G1_verify failed")
             else:
                 ret["message"] = (
-                    f"Phase not supported for {self.__class__.__name__}"
+                    f"Phase not supported for {self.__class__.__name__}{self._name.upper()}"
                 )
                 self._logger.error(ret["message"])
         return ret
 
-    def join_mem(self, message, key):
+    def join_mem(
+        self, message: dict[str, Any], member_key: MemberKey
+    ) -> dict[str, Any]:
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
@@ -149,13 +194,13 @@ class PS16(JoinMixin, ReprMixin, SchemeInterface):
             n = G1.from_b64(message["n"])
 
             ## Compute secret exponent, tau and ttau
-            key.sk.set_random()
-            tau = self.grpkey.g * key.sk
-            ttau = self.grpkey.Y * key.sk
+            member_key.sk.set_random()
+            tau = self.group_key.g * member_key.sk
+            ttau = self.group_key.Y * member_key.sk
 
             ## Compute the SPK for sk
             proof = spk.discrete_log_sign(
-                tau, self.grpkey.g, key.sk, n.to_bytes()
+                tau, self.group_key.g, member_key.sk, n.to_bytes()
             )
 
             ## Build the output message
@@ -175,24 +220,24 @@ class PS16(JoinMixin, ReprMixin, SchemeInterface):
             # We have sk in memkey, so just need to copy the
             # sigma1 and sigma2 values from the received message,
             # which is an exported (partial) memkey
-            key.sigma1.set_b64(message["sigma1"])
-            key.sigma2.set_b64(message["sigma2"])
+            member_key.sigma1.set_b64(message["sigma1"])
+            member_key.sigma2.set_b64(message["sigma2"])
             ret["status"] = "success"
         else:
             ret["message"] = (
-                f"Phase not supported for {self.__class__.__name__}"
+                f"Phase not supported for {self.__class__.__name__}{self._name.upper()}"
             )
             self._logger.error(ret["message"])
         return ret
 
-    def sign(self, message, key):
+    def sign(self, message: str, member_key: MemberKey) -> dict[str, Any]:
         message = str(message)
 
         ## Randomize sigma1 and sigma2
         t = Fr.from_random()
         sig = Signature()
-        sig.sigma1.set_object(key.sigma1 * t)
-        sig.sigma2.set_object(key.sigma2 * t)
+        sig.sigma1.set_object(member_key.sigma1 * t)
+        sig.sigma2.set_object(member_key.sigma2 * t)
 
         ## Compute signature of knowledge of sk
         # The SPK in PS16 is a dlog spk, but does not follow exactly the
@@ -200,7 +245,7 @@ class PS16(JoinMixin, ReprMixin, SchemeInterface):
         # A good improvement would be to analyze how to generalize spk_dlog
         # to fit this
         k = Fr.from_random()
-        e = (GT.pairing(sig.sigma1, self.grpkey.Y)) ** k
+        e = (GT.pairing(sig.sigma1, self.group_key.Y)) ** k
 
         # c = hash(ps16_sig->sigma1,ps16_sig->sigma2,e,m)
         h = hashlib.sha256()
@@ -211,23 +256,23 @@ class PS16(JoinMixin, ReprMixin, SchemeInterface):
 
         ## Complete the sig
         sig.pi.c.set_hash(h.digest())
-        sig.pi.s.set_object(k + (sig.pi.c * key.sk))
+        sig.pi.s.set_object(k + (sig.pi.c * member_key.sk))
         return {
             "status": "success",
             "signature": sig.to_b64(),
         }
 
-    def verify(self, message, signature):
+    def verify(self, message: str, signature: str) -> dict[str, Any]:
         message = str(message)
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
 
         # e1 = e(-sigma1,X)
-        e1 = GT.pairing(-sig.sigma1, self.grpkey.X)
+        e1 = GT.pairing(-sig.sigma1, self.group_key.X)
         # e2 = e(sigma2,gg)
-        e2 = GT.pairing(sig.sigma2, self.grpkey.gg)
+        e2 = GT.pairing(sig.sigma2, self.group_key.gg)
         # e3 = e(sigma1*s,Y)
-        e3 = GT.pairing(sig.sigma1 * sig.pi.s, self.grpkey.Y)
+        e3 = GT.pairing(sig.sigma1 * sig.pi.s, self.group_key.Y)
 
         # R = ((e1*e2)**-c)*e3
         R = ~((e1 * e2) ** sig.pi.c) * e3
@@ -249,11 +294,11 @@ class PS16(JoinMixin, ReprMixin, SchemeInterface):
             self._logger.debug("c != sig.pi.c")
         return ret
 
-    def open(self, signature):
+    def open(self, signature: str) -> dict[str, Any]:
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
-        e1 = GT.pairing(sig.sigma2, self.grpkey.gg)
-        e2 = GT.pairing(sig.sigma1, self.grpkey.X)
+        e1 = GT.pairing(sig.sigma2, self.group_key.gg)
+        e2 = GT.pairing(sig.sigma1, self.group_key.X)
         e4 = e1 / e2
         for mem_id, (_, ttau) in self.gml.items():
             e3 = GT.pairing(sig.sigma1, ttau)
@@ -267,12 +312,12 @@ class PS16(JoinMixin, ReprMixin, SchemeInterface):
                 break
         return ret
 
-    def open_verify(self, signature, proof):
+    def open_verify(self, signature: str, proof: str) -> dict[str, Any]:
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
         proof_ = spk.PairingHomomorphismProof.from_b64(proof)
-        e1 = GT.pairing(sig.sigma2, self.grpkey.gg)
-        e2 = GT.pairing(sig.sigma1, self.grpkey.X)
+        e1 = GT.pairing(sig.sigma2, self.group_key.gg)
+        e2 = GT.pairing(sig.sigma1, self.group_key.X)
         e4 = e1 / e2
         if spk.pairing_homomorphism_verify(
             sig.sigma1, e4, proof_, sig.to_b64()

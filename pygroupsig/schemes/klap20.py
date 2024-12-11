@@ -1,26 +1,44 @@
 import hashlib
 import logging
 import random
+from typing import Any
 
 import pygroupsig.utils.spk as spk
-from pygroupsig.interfaces import ContainerInterface, SchemeInterface
+from pygroupsig.interfaces import Container, Scheme
 from pygroupsig.utils.helpers import (
     GML,
     B64Mixin,
     InfoMixin,
     JoinMixin,
+    MetadataGroupKeyMixin,
+    MetadataManagerKeyMixin,
+    MetadataMemberKeyMixin,
+    MetadataSignatureMixin,
     ReprMixin,
 )
 from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
-_NAME = "klap20"
+
+class MetadataMixin:
+    _name = "klap20"
 
 
-class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "group"
+class GroupKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataGroupKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    g: G1
+    gg: G2
+    XX: G2
+    YY: G2
+    ZZ0: G2
+    ZZ1: G2
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.g = G1()  # Random generator of G1
         self.gg = G2()  # Random generator of G1
         self.XX = G2()  # gg^x (x is part of mgrkey)
@@ -29,78 +47,109 @@ class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.ZZ1 = G2()  # gg^z1 (z1 is part of mgrkey)
 
 
-class ManagerKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "manager"
+class ManagerKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataManagerKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    x: Fr
+    y: Fr
+    z0: Fr
+    z1: Fr
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.x = Fr()  # Issuer component x
         self.y = Fr()  # Issuer component y
         self.z0 = Fr()  # Opener component z_0
         self.z1 = Fr()  # Opener component z_1
 
 
-class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "member"
+class MemberKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataMemberKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    alpha: Fr
+    u: G1
+    v: G1
+    w: G1
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.alpha = Fr()
         self.u = G1()
         self.v = G1()
         self.w = G1()
 
 
-class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "signature"
+class Signature(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataSignatureMixin,
+    MetadataMixin,
+    Container,
+):
+    uu: G1
+    vv: G1
+    ww: G1
+    pi: spk.DiscreteLogProof
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.uu = G1()
         self.vv = G1()
         self.ww = G1()
         self.pi = spk.DiscreteLogProof()
 
 
-class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
+class Group(
+    JoinMixin, ReprMixin, MetadataMixin, Scheme[GroupKey, ManagerKey, MemberKey]
+):
     _logger = logging.getLogger(__name__)
 
-    def __init__(self):
-        self.grpkey = GroupKey()
-        self.mgrkey = ManagerKey()
+    gml: GML
+
+    def __init__(self) -> None:
+        self.group_key = GroupKey()
+        self.manager_key = ManagerKey()
         self.gml = GML()
 
-    def setup(self):
+    def setup(self) -> None:
         ## Initializes the Issuer's key
-        self.mgrkey.x.set_random()
-        self.mgrkey.y.set_random()
+        self.manager_key.x.set_random()
+        self.manager_key.y.set_random()
 
         ## Initializes the Group key
         # Compute random generators g and gg. Since G1 and G2 are cyclic
         # groups of prime order, just pick random elements
-        self.grpkey.g.set_random()
-        self.grpkey.gg.set_random()
+        self.group_key.g.set_random()
+        self.group_key.gg.set_random()
 
         ## Partially fill the group key with the Issuer's public key
-        self.grpkey.XX.set_object(self.grpkey.gg * self.mgrkey.x)
-        self.grpkey.YY.set_object(self.grpkey.gg * self.mgrkey.y)
+        self.group_key.XX.set_object(self.group_key.gg * self.manager_key.x)
+        self.group_key.YY.set_object(self.group_key.gg * self.manager_key.y)
 
         ## Initialize the Opener's key
-        self.mgrkey.z0.set_random()
-        self.mgrkey.z1.set_random()
+        self.manager_key.z0.set_random()
+        self.manager_key.z1.set_random()
 
         ## Finalize the group key with the Opener's public key
-        self.grpkey.ZZ0.set_object(self.grpkey.gg * self.mgrkey.z0)
-        self.grpkey.ZZ1.set_object(self.grpkey.gg * self.mgrkey.z1)
+        self.group_key.ZZ0.set_object(self.group_key.gg * self.manager_key.z0)
+        self.group_key.ZZ1.set_object(self.group_key.gg * self.manager_key.z1)
 
-    def join_mgr(self, message=None):
+    def join_mgr(self, message: dict[str, Any] | None = None) -> dict[str, Any]:
         ret = {"status": "error"}
         if message is None:
             ## Send a random element to the member
             n = G1.from_random()
             ret["status"] = "success"
             ret["n"] = n.to_b64()
-            ret["phase"] = 1
+            ret["phase"] = 1  # type: ignore
             ## TODO: This value should be saved in some place to avoid replay attack
         else:
             if not isinstance(message, dict):
@@ -126,11 +175,11 @@ class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
 
                 y = [f, w, SS0, SS1, ff0, ff1]
                 g = [
-                    self.grpkey.g,
+                    self.group_key.g,
                     u,
-                    self.grpkey.gg,
-                    self.grpkey.ZZ0,
-                    self.grpkey.ZZ1,
+                    self.group_key.gg,
+                    self.group_key.ZZ0,
+                    self.group_key.ZZ1,
                 ]
                 i = [
                     (0, 0),  # alpha, g
@@ -146,9 +195,9 @@ class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
                 if spk.general_representation_verify(
                     y, g, i, prods, proof, n.to_bytes(), manual=True
                 ):
-                    v = (u * self.mgrkey.x) + (w * self.mgrkey.y)
+                    v = (u * self.manager_key.x) + (w * self.manager_key.y)
                     # Add the tuple (i,SS0,SS1,ff0,ff1,tau) to the GML
-                    tau = GT.pairing(f, self.grpkey.gg)
+                    tau = GT.pairing(f, self.group_key.gg)
                     # Currently, KLAP20 identities are just uint64_t's
                     h = hashlib.sha256()
                     h.update(SS0.to_bytes())
@@ -168,12 +217,14 @@ class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
                     self._logger.debug("spk.verify failed")
             else:
                 ret["message"] = (
-                    f"Phase not supported for {self.__class__.__name__}"
+                    f"Phase not supported for {self.__class__.__name__}{self._name.upper()}"
                 )
                 self._logger.error(ret["message"])
         return ret
 
-    def join_mem(self, message, key):
+    def join_mem(
+        self, message: dict[str, Any], member_key: MemberKey
+    ) -> dict[str, Any]:
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
@@ -185,44 +236,44 @@ class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
             n = G1.from_b64(message["n"])
 
             ## Compute secret alpha, s0 and s1
-            key.alpha.set_random()
+            member_key.alpha.set_random()
 
             s0 = Fr.from_random()
             s1 = Fr.from_random()
 
             # f = g*alpha
-            f = self.grpkey.g * key.alpha
+            f = self.group_key.g * member_key.alpha
             # u = Hash(f)
             h = hashlib.sha256(f.to_bytes())
-            key.u.set_hash(h.digest())
+            member_key.u.set_hash(h.digest())
 
             # w = u*alpha
-            key.w.set_object(key.u * key.alpha)
+            member_key.w.set_object(member_key.u * member_key.alpha)
 
             # SS0 = gg*s0
-            SS0 = self.grpkey.gg * s0
+            SS0 = self.group_key.gg * s0
             # SS1 = gg*s1
-            SS1 = self.grpkey.gg * s1
+            SS1 = self.group_key.gg * s1
 
-            ggalpha = self.grpkey.gg * key.alpha
+            ggalpha = self.group_key.gg * member_key.alpha
             # ff0 = gg*alpha+ZZ0*s0
-            ff0 = ggalpha + (self.grpkey.ZZ0 * s0)
+            ff0 = ggalpha + (self.group_key.ZZ0 * s0)
             # ff1 = gg*alpha+ZZ1*s1
-            ff1 = ggalpha + (self.grpkey.ZZ1 * s1)
+            ff1 = ggalpha + (self.group_key.ZZ1 * s1)
 
             # tau = e(f,gg)
             # tau = GT.pairing(f, self.grpkey.gg)
             ## TODO: Whats the usage of tau in this current phase?
 
-            y = [f, key.w, SS0, SS1, ff0, ff1]
+            y = [f, member_key.w, SS0, SS1, ff0, ff1]
             g = [
-                self.grpkey.g,
-                key.u,
-                self.grpkey.gg,
-                self.grpkey.ZZ0,
-                self.grpkey.ZZ1,
+                self.group_key.g,
+                member_key.u,
+                self.group_key.gg,
+                self.group_key.ZZ0,
+                self.group_key.ZZ1,
             ]
-            x = [key.alpha, s0, s1]
+            x = [member_key.alpha, s0, s1]
             i = [
                 (0, 0),  # alpha, g
                 (0, 1),  # alpha, u
@@ -241,7 +292,7 @@ class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
             ret["status"] = "success"
             ret["n"] = n.to_b64()
             ret["f"] = f.to_b64()
-            ret["w"] = key.w.to_b64()
+            ret["w"] = member_key.w.to_b64()
             ret["SS0"] = SS0.to_b64()
             ret["SS1"] = SS1.to_b64()
             ret["ff0"] = ff0.to_b64()
@@ -254,11 +305,11 @@ class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
                 self._logger.error(ret["message"])
                 return ret
             # Min = v
-            key.v = G1.from_b64(message["v"])
+            member_key.v = G1.from_b64(message["v"])
             # Check correctness: e(v,gg) = e(u,XX)e(w,YY)
-            e1 = GT.pairing(key.v, self.grpkey.gg)
-            e2 = GT.pairing(key.u, self.grpkey.XX)
-            e3 = GT.pairing(key.w, self.grpkey.YY)
+            e1 = GT.pairing(member_key.v, self.group_key.gg)
+            e2 = GT.pairing(member_key.u, self.group_key.XX)
+            e3 = GT.pairing(member_key.w, self.group_key.YY)
             e4 = e2 * e3
             if e1 == e4:
                 ret["status"] = "success"
@@ -268,22 +319,22 @@ class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
                 self._logger.debug("e1 != e4")
         else:
             ret["message"] = (
-                f"Phase not supported for {self.__class__.__name__}"
+                f"Phase not supported for {self.__class__.__name__}{self._name.upper()}"
             )
             self._logger.error(ret["message"])
         return ret
 
-    def sign(self, message, key):
+    def sign(self, message: str, member_key: MemberKey) -> dict[str, Any]:
         message = str(message)
         ## Randomize u, v and w
         r = Fr.from_random()
         sig = Signature()
-        sig.uu.set_object(key.u * r)
-        sig.vv.set_object(key.v * r)
-        sig.ww.set_object(key.w * r)
+        sig.uu.set_object(member_key.u * r)
+        sig.vv.set_object(member_key.v * r)
+        sig.ww.set_object(member_key.w * r)
 
         ## Compute signature of knowledge of alpha
-        proof = spk.discrete_log_sign(sig.ww, sig.uu, key.alpha, message)
+        proof = spk.discrete_log_sign(sig.ww, sig.uu, member_key.alpha, message)
         sig.pi.c.set_object(proof.c)
         sig.pi.s.set_object(proof.s)
         return {
@@ -291,18 +342,18 @@ class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
             "signature": sig.to_b64(),
         }
 
-    def verify(self, message, signature):
+    def verify(self, message: str, signature: str) -> dict[str, Any]:
         message = str(message)
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
         ## Verify SPK
         if spk.discrete_log_verify(sig.ww, sig.uu, sig.pi, message):
             # e1 = e(vv,gg)
-            e1 = GT.pairing(sig.vv, self.grpkey.gg)
+            e1 = GT.pairing(sig.vv, self.group_key.gg)
             # e2 = e(uu,XX)
-            e2 = GT.pairing(sig.uu, self.grpkey.XX)
+            e2 = GT.pairing(sig.uu, self.group_key.XX)
             # e3 = e(ww,YY)
-            e3 = GT.pairing(sig.ww, self.grpkey.YY)
+            e3 = GT.pairing(sig.ww, self.group_key.YY)
             e4 = e2 * e3
             ## Compare the result with the received challenge
             if e1 == e4:
@@ -315,37 +366,37 @@ class KLAP20(JoinMixin, ReprMixin, SchemeInterface):
             self._logger.debug("spk.dlog_G1_verify failed")
         return ret
 
-    def open(self, signature):
+    def open(self, signature: str) -> dict[str, Any]:
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
         b = random.randint(0, 1)
         for mem_id, (SS0, SS1, ff0, ff1, tau) in self.gml.items():
             if b:
-                aux = -(SS1 * self.mgrkey.z1)
+                aux = -(SS1 * self.manager_key.z1)
                 ff = ff1 + aux
             else:
-                aux = -(SS0 * self.mgrkey.z0)
+                aux = -(SS0 * self.manager_key.z0)
                 ff = ff0 + aux
             e1 = GT.pairing(sig.uu, ff)
-            e2 = GT.pairing(sig.ww, self.grpkey.gg)
-            e3 = GT.pairing(self.grpkey.g, ff)
+            e2 = GT.pairing(sig.ww, self.group_key.gg)
+            e3 = GT.pairing(self.group_key.g, ff)
             if e1 == e2 and tau == e3:
                 ret["status"] = "success"
                 ret["id"] = mem_id
                 proof = spk.pairing_homomorphism_sign2(
-                    ff, sig.uu, self.grpkey.g, e2, e3, tau, sig.to_b64()
+                    ff, sig.uu, self.group_key.g, e2, e3, tau, sig.to_b64()
                 )
                 ret["proof"] = proof.to_b64()
                 break
         return ret
 
-    def open_verify(self, signature, proof):
+    def open_verify(self, signature: str, proof: str) -> dict[str, Any]:
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
         proof_ = spk.PairingHomomorphismProof2.from_b64(proof)
-        e2 = GT.pairing(sig.ww, self.grpkey.gg)
+        e2 = GT.pairing(sig.ww, self.group_key.gg)
         if spk.pairing_homomorphism_verify2(
-            proof_, sig.uu, self.grpkey.g, e2, sig.to_b64()
+            proof_, sig.uu, self.group_key.g, e2, sig.to_b64()
         ):
             ret["status"] = "success"
         return ret

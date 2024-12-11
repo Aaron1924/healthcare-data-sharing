@@ -1,19 +1,41 @@
 import hashlib
 import logging
+from typing import Any, Generic, Type, TypeVar
 
 import pygroupsig.utils.spk as spk
-from pygroupsig.interfaces import ContainerInterface, SchemeInterface
-from pygroupsig.utils.helpers import B64Mixin, InfoMixin, JoinMixin, ReprMixin
+from pygroupsig.interfaces import Container, Scheme
+from pygroupsig.utils.helpers import (
+    B64Mixin,
+    InfoMixin,
+    JoinMixin,
+    MetadataGroupKeyMixin,
+    MetadataManagerKeyMixin,
+    MetadataMemberKeyMixin,
+    MetadataSignatureMixin,
+    ReprMixin,
+)
 from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
-_NAME = "dl21"
+
+class MetadataMixin:
+    _name = "dl21"
 
 
-class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "group"
+class GroupKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataGroupKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    g1: G1
+    g2: G2
+    h1: G1
+    h2: G1
+    ipk: G2
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.g1 = G1()  # Params. Random generator of G1
         self.g2 = G2()  # Params. Random generator of G2
         self.h1 = G1()  # Params. Random generator of G1
@@ -21,19 +43,36 @@ class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.ipk = G2()  # Isseur public key
 
 
-class ManagerKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "manager"
+class ManagerKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataManagerKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    isk: Fr
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.isk = Fr()  # Issuer secret key
 
 
-class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "member"
+class MemberKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataMemberKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    A: G1
+    x: Fr
+    y: Fr
+    s: Fr
+    H: G1
+    h2s: G1
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.A = G1()  # A = (H*h2^s*g1)^(1/isk+x)
         self.x = Fr()  # Randomly picked by the Issuer
         self.y = Fr()  # Randomly picked by the Member
@@ -42,11 +81,21 @@ class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.h2s = G1()  # Used in signatures. h2s = h2^s
 
 
-class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "signature"
+class Signature(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataSignatureMixin,
+    MetadataMixin,
+    Container,
+):
+    AA: G1
+    A_: G1
+    d: G1
+    pi: spk.GeneralRepresentationProof
+    nym: G1
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.AA = G1()
         self.A_ = G1()
         self.d = G1()
@@ -54,37 +103,46 @@ class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.nym = G1()
 
 
-class DL21(JoinMixin, ReprMixin, SchemeInterface):
+SignatureT = TypeVar("SignatureT", bound=Signature)
+
+
+class Group(
+    JoinMixin,
+    ReprMixin,
+    MetadataMixin,
+    Generic[SignatureT],
+    Scheme[GroupKey, ManagerKey, MemberKey],
+):
     _logger = logging.getLogger(__name__)
 
-    def __init__(self):
-        self.grpkey = GroupKey()
-        self.mgrkey = ManagerKey()
+    def __init__(self) -> None:
+        self.group_key = GroupKey()
+        self.manager_key = ManagerKey()
 
-    def setup(self):
+    def setup(self) -> None:
         ## Initialize the manager key
-        self.mgrkey.isk.set_random()
+        self.manager_key.isk.set_random()
 
         ## Initialize the group key
-        self.grpkey.g1.set_random()
-        self.grpkey.h1.set_random()
-        self.grpkey.h2.set_random()
+        self.group_key.g1.set_random()
+        self.group_key.h1.set_random()
+        self.group_key.h2.set_random()
 
         ## Compute random generator g2 in G2. Since G2 is a cyclic group of prime
         ## order, just pick a random element
-        self.grpkey.g2.set_random()
+        self.group_key.g2.set_random()
 
         ## Set the Issuer public key
-        self.grpkey.ipk.set_object(self.grpkey.g2 * self.mgrkey.isk)
+        self.group_key.ipk.set_object(self.group_key.g2 * self.manager_key.isk)
 
-    def join_mgr(self, message=None):
+    def join_mgr(self, message: dict[str, Any] | None = None) -> dict[str, Any]:
         ret = {"status": "error"}
         if message is None:
             ## Send a random element to the member
             n = G1.from_random()
             ret["status"] = "success"
             ret["n"] = n.to_b64()
-            ret["phase"] = 1
+            ret["phase"] = 1  # type: ignore
             ## TODO: This value should be saved in some place to avoid replay attack
         else:
             if not isinstance(message, dict):
@@ -99,15 +157,15 @@ class DL21(JoinMixin, ReprMixin, SchemeInterface):
                 H = G1.from_b64(message["H"])
                 proof = spk.DiscreteLogProof.from_b64(message["pi"])
                 if spk.discrete_log_verify(
-                    H, self.grpkey.h1, proof, n.to_bytes()
+                    H, self.group_key.h1, proof, n.to_bytes()
                 ):
                     ## Pick x and s at random from Z*_p
                     x = Fr.from_random()
                     s = Fr.from_random()
 
                     # Set A = (H+h_2*s+g_1)*((isk+x)**-1)
-                    A = (H + (self.grpkey.h2 * s) + self.grpkey.g1) * ~(
-                        self.mgrkey.isk + x
+                    A = (H + (self.group_key.h2 * s) + self.group_key.g1) * ~(
+                        self.manager_key.isk + x
                     )
 
                     ## Mout = (A,x,s)
@@ -123,12 +181,14 @@ class DL21(JoinMixin, ReprMixin, SchemeInterface):
                     self._logger.debug("spk.dlog_G1_verify failed")
             else:
                 ret["message"] = (
-                    f"Phase not supported for {self.__class__.__name__}"
+                    f"Phase not supported for {self.__class__.__name__}{self._name.upper()}"
                 )
                 self._logger.error(ret["message"])
         return ret
 
-    def join_mem(self, message, key):
+    def join_mem(
+        self, message: dict[str, Any], member_key: MemberKey
+    ) -> dict[str, Any]:
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
@@ -140,43 +200,45 @@ class DL21(JoinMixin, ReprMixin, SchemeInterface):
             n = G1.from_b64(message["n"])
 
             ## Compute member's secret key y at random
-            key.y.set_random()
+            member_key.y.set_random()
 
             ## Compute the member's public key
-            key.H.set_object(self.grpkey.h1 * key.y)
+            member_key.H.set_object(self.group_key.h1 * member_key.y)
 
             ## Compute the SPK
             proof = spk.discrete_log_sign(
-                key.H, self.grpkey.h1, key.y, n.to_bytes()
+                member_key.H, self.group_key.h1, member_key.y, n.to_bytes()
             )
 
             ## Build the output message
             ret["status"] = "success"
             ret["n"] = n.to_b64()
-            ret["H"] = key.H.to_b64()
+            ret["H"] = member_key.H.to_b64()
             ret["pi"] = proof.to_b64()
             ret["phase"] = phase + 1
         elif phase == 3:
             ## Second step by the member: Check correctness of computation
             ## and update memkey
-            key.x.set_b64(message["x"])
-            key.s.set_b64(message["s"])
-            key.A.set_b64(message["A"])
+            member_key.x.set_b64(message["x"])
+            member_key.s.set_b64(message["s"])
+            member_key.A.set_b64(message["A"])
 
             ## Recompute h2s from s
-            key.h2s.set_object(self.grpkey.h2 * key.s)
+            member_key.h2s.set_object(self.group_key.h2 * member_key.s)
 
             ## Check correctness
 
             ## A must not be 1 (since we use additive notation for G1,
             ## it must not be 0)
-            if not key.A.is_zero():
+            if not member_key.A.is_zero():
                 # Check correctness: e(v,gg) = e(u,XX)e(w,YY)
-                e1 = (GT.pairing(key.A, self.grpkey.g2)) ** key.x
-                e2 = GT.pairing(key.A, self.grpkey.ipk)
+                e1 = (
+                    GT.pairing(member_key.A, self.group_key.g2)
+                ) ** member_key.x
+                e2 = GT.pairing(member_key.A, self.group_key.ipk)
                 e4 = e1 * e2
-                aux = (key.h2s + key.H) + self.grpkey.g1
-                e3 = GT.pairing(aux, self.grpkey.g2)
+                aux = (member_key.h2s + member_key.H) + self.group_key.g1
+                e3 = GT.pairing(aux, self.group_key.g2)
                 if e4 == e3:
                     ret["status"] = "success"
                 else:
@@ -189,61 +251,63 @@ class DL21(JoinMixin, ReprMixin, SchemeInterface):
                 self._logger.debug("key.A is zero")
         else:
             ret["message"] = (
-                f"Phase not supported for {self.__class__.__name__}"
+                f"Phase not supported for {self.__class__.__name__}{self._name.upper()}"
             )
             self._logger.error(ret["message"])
         return ret
 
-    def sign(self, message, key, scope="def"):
-        sig = self._common_sign(message, key, scope)
+    _scheme_signature: Type[SignatureT] = Signature  # type: ignore
+
+    def sign(
+        self, message: str, member_key: MemberKey, scope: str = "def"
+    ) -> dict[str, Any]:
+        sig = self._common_sign(message, member_key, scope)
         return {
             "status": "success",
             "signature": sig.to_b64(),
         }
 
-    def _signature_factory(self):
-        return Signature
-
-    def _common_sign(self, message, key, scope):
+    def _common_sign(
+        self, message: str, member_key: MemberKey, scope: str
+    ) -> SignatureT:
         message = str(message)
         scope = str(scope)
         # r1, r2 \in_R Z_p
         r1 = Fr.from_random()
         r2 = Fr.from_random()
 
-        sig = self._signature_factory()()
+        sig = self._scheme_signature()
         # nym = Hash(scp)*y
         h = hashlib.sha256(scope.encode())
         hscp = G1.from_hash(h.digest())
-        sig.nym.set_object(hscp * key.y)
+        sig.nym.set_object(hscp * member_key.y)
 
         # AA = A*r1
-        sig.AA.set_object(key.A * r1)
+        sig.AA.set_object(member_key.A * r1)
 
         ## Good thing we precomputed much of this...
         # aux = (g1*h1^y*h2^s)^r1
-        aux = (self.grpkey.g1 + key.H + key.h2s) * r1
+        aux = (self.group_key.g1 + member_key.H + member_key.h2s) * r1
         # A_ = AA*-x+(g1+h1*y+h2*s)*r1
-        sig.A_.set_object((sig.AA * -key.x) + aux)
+        sig.A_.set_object((sig.AA * -member_key.x) + aux)
 
         # d = (g1+h1*y+h2*s)*r1+h2*-r2
-        sig.d.set_object(aux + (self.grpkey.h2 * -r2))
+        sig.d.set_object(aux + (self.group_key.h2 * -r2))
 
         # r3 = r1**-1
         r3 = ~r1
 
         # ss = s - r2*r3
-        ss = key.s - (r2 * r3)
-
+        ss = member_key.s - (r2 * r3)
         ## Auxiliar variables for the spk
-        aux_Zr = -key.x
+        aux_Zr = -member_key.x
         ss = -ss
-        negy = -key.y
+        negy = -member_key.y
         A_d = sig.A_ - sig.d
 
-        y = [sig.nym, A_d, self.grpkey.g1]
-        g = [hscp, sig.AA, self.grpkey.h2, sig.d, self.grpkey.h1]
-        x = [aux_Zr, key.y, r2, r3, ss, negy]
+        y = [sig.nym, A_d, self.group_key.g1]
+        g = [hscp, sig.AA, self.group_key.h2, sig.d, self.group_key.h1]
+        x = [aux_Zr, member_key.y, r2, r3, ss, negy]
         i = [
             (1, 0),  # hscp^y = (g[0],x[1])
             (0, 1),  # AA^-x = (g[1],x[0])
@@ -258,24 +322,26 @@ class DL21(JoinMixin, ReprMixin, SchemeInterface):
         sig.pi.s.extend(proof.s)
         return sig
 
-    def verify(self, message, signature, scope="def"):
+    def verify(
+        self, message: str, signature: str, scope: str = "def"
+    ) -> dict[str, Any]:
         message = str(message)
         scope = str(scope)
         ret = {"status": "fail"}
-        sig = self._signature_factory().from_b64(signature)
+        sig = self._scheme_signature.from_b64(signature)
         ## AA must not be 1 (since we use additive notation for G1,
         ## it must not be 0)
         if not sig.AA.is_zero():
             ## e(AA,ipk) must equal e(A_,g2)
-            e1 = GT.pairing(sig.AA, self.grpkey.ipk)
-            e2 = GT.pairing(sig.A_, self.grpkey.g2)
+            e1 = GT.pairing(sig.AA, self.group_key.ipk)
+            e2 = GT.pairing(sig.A_, self.group_key.g2)
             if e1 == e2:
                 ## Recompute hscp
                 h = hashlib.sha256(scope.encode())
                 hscp = G1.from_hash(h.digest())
                 A_d = sig.A_ - sig.d
-                y = [sig.nym, A_d, self.grpkey.g1]
-                g = [hscp, sig.AA, self.grpkey.h2, sig.d, self.grpkey.h1]
+                y = [sig.nym, A_d, self.group_key.g1]
+                g = [hscp, sig.AA, self.group_key.h2, sig.d, self.group_key.h1]
                 i = [
                     (1, 0),  # hscp^y = (g[0],x[1])
                     (0, 1),  # AA^-x = (g[1],x[0])
@@ -301,21 +367,31 @@ class DL21(JoinMixin, ReprMixin, SchemeInterface):
             self._logger.debug("AA is zero")
         return ret
 
-    def identify(self, signature, key, scope="def"):
+    # noinspection PyUnresolvedReferences
+    def identify(
+        self, signature: str, member_key: MemberKey, scope: str = "def"
+    ) -> dict[str, Any]:
         scope = str(scope)
         ret = {"status": "fail"}
-        sig = self._signature_factory().from_b64(signature)
+        sig = self._scheme_signature.from_b64(signature)
         ## Recompute nym
         h = hashlib.sha256()
         h.update(scope.encode())
         hscp = G1.from_hash(h.digest())
-        nym = hscp * key.y
+        nym = hscp * member_key.y
         ## Check if nym = h(scp)*y
         if nym == sig.nym:
             ret["status"] = "success"
         return ret
 
-    def link(self, message, messages, signatures, key, scope="def"):
+    def link(
+        self,
+        message: str,
+        messages: list[str],
+        signatures: list[str],
+        member_key: MemberKey,
+        scope: str = "def",
+    ) -> dict[str, Any]:
         scope = str(scope)
         ret = {"status": "fail"}
         hscp = G1()
@@ -323,7 +399,7 @@ class DL21(JoinMixin, ReprMixin, SchemeInterface):
             ## Verify signature
             ver_msg = self.verify(msg, sig_b64, scope=scope)
             ## Check if it is a signature issued by memkey
-            iden_msg = self.identify(sig_b64, key, scope=scope)
+            iden_msg = self.identify(sig_b64, member_key, scope=scope)
             h = hashlib.sha256()
             if (
                 ver_msg["status"] == "success"
@@ -342,14 +418,22 @@ class DL21(JoinMixin, ReprMixin, SchemeInterface):
                 break
         else:
             # nym_ = hscp * y
-            nym = hscp * key.y
+            nym = hscp * member_key.y
             ## Do the SPK
-            proof = spk.discrete_log_sign(nym, hscp, key.y, message)
+            proof = spk.discrete_log_sign(nym, hscp, member_key.y, message)
             ret["status"] = "success"
             ret["proof"] = proof.to_b64()
         return ret
 
-    def link_verify(self, message, messages, signatures, proof, scope="def"):
+    # noinspection PyUnresolvedReferences
+    def link_verify(
+        self,
+        message: str,
+        messages: list[str],
+        signatures: list[str],
+        proof: str,
+        scope: str = "def",
+    ) -> dict[str, Any]:
         scope = str(scope)
         ret = {"status": "fail"}
         proof_ = spk.DiscreteLogProof.from_b64(proof)
@@ -363,7 +447,7 @@ class DL21(JoinMixin, ReprMixin, SchemeInterface):
                 ## "Accumulate" scp
                 hscp += G1.from_hash(h.digest())
                 ## "Accumulate" nym
-                sig = self._signature_factory().from_b64(sig_b64)
+                sig = self._scheme_signature.from_b64(sig_b64)
                 nym += sig.nym
             else:
                 ret["message"] = "Invalid messages/signatures"

@@ -2,20 +2,47 @@ import hashlib
 import logging
 import random
 import time
+from typing import Any, Type
 
 import pygroupsig.utils.spk as spk
-from pygroupsig.interfaces import ContainerInterface, SchemeInterface
-from pygroupsig.utils.helpers import B64Mixin, InfoMixin, JoinMixin, ReprMixin
+from pygroupsig.interfaces import Container, Scheme
+from pygroupsig.utils.helpers import (
+    B64Mixin,
+    InfoMixin,
+    JoinMixin,
+    MetadataGroupKeyMixin,
+    MetadataManagerKeyMixin,
+    MetadataMemberKeyMixin,
+    MetadataSignatureMixin,
+    ReprMixin,
+)
 from pygroupsig.utils.mcl import G1, G2, GT, Fr
 
-_NAME = "gl19"
+
+class MetadataMixin:
+    _name = "gl19"
 
 
-class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "group"
+class GroupKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataGroupKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    g1: G1
+    g2: G2
+    g: G1
+    h: G1
+    h1: G1
+    h2: G1
+    h3: G1
+    ipk: G2
+    cpk: G1
+    epk: G1
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.g1 = G1()  # Random generator of G1
         self.g2 = G2()  # Random generator of G2
         self.g = G1()  # Random generator of G1
@@ -28,21 +55,43 @@ class GroupKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.epk = G1()  # Extractor public key
 
 
-class ManagerKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "manager"
+class ManagerKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataManagerKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    isk: Fr
+    csk: Fr
+    esk: Fr
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.isk = Fr()  # Issuer secret key
         self.csk = Fr()  # Converter secret key
         self.esk = Fr()  # Extractor secret key
 
 
-class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "member"
+class MemberKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataMemberKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    A: G1
+    x: Fr
+    y: Fr
+    s: Fr
+    l: int
+    d: Fr
+    H: G1
+    h2s: G1
+    h3d: G1
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.A = G1()  # A = (H*h2^s*g1)^(1/isk+x)
         self.x = Fr()  # Randomly picked by the Issuer
         self.y = Fr()  # Randomly picked by the Member
@@ -54,30 +103,51 @@ class MemberKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.h3d = G1()  # Used in signatures. h3d = h3^d
 
 
-class BlindKey(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "blind"
+class BlindKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataSignatureMixin,
+    MetadataMixin,
+    Container,
+):
+    pk: G1
+    sk: Fr
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.pk = G1()  # Public key. Equals g^sk
         self.sk = Fr()  # Randomly chosen private key
 
     @classmethod
-    def from_random(cls, grpkey):
+    def from_random(cls: Type["BlindKey"], grpkey: GroupKey) -> "BlindKey":
         ret = cls()
         ret.sk.set_random()
         ret.pk.set_object(grpkey.g * ret.sk)
         return ret
 
-    def public(self):
+    def public(self) -> str:
         return self.pk.to_b64()
 
 
-class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "signature"
+class Signature(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataSignatureMixin,
+    MetadataMixin,
+    Container,
+):
+    AA: G1
+    A_: G1
+    d: G1
+    pi: spk.GeneralRepresentationProof
+    nym1: G1
+    nym2: G1
+    ehy1: G1
+    ehy2: G1
+    expiration: int
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.AA = G1()
         self.A_ = G1()
         self.d = G1()
@@ -94,11 +164,21 @@ class Signature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         # expiration date
 
 
-class BlindSignature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
-    _NAME = _NAME
-    _CTYPE = "blind_signature"
+class BlindSignature(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataSignatureMixin,
+    MetadataMixin,
+    Container,
+):
+    nym1: G1
+    nym2: G1
+    nym3: G1
+    c1: G1
+    c2: G1
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.nym1 = G1()
         self.nym2 = G1()
         self.nym3 = G1()
@@ -106,58 +186,60 @@ class BlindSignature(B64Mixin, InfoMixin, ReprMixin, ContainerInterface):
         self.c2 = G1()
 
 
-class GL19(JoinMixin, ReprMixin, SchemeInterface):
-    LIFETIME = 60 * 60 * 24 * 14  # two weeks
+class Group(
+    JoinMixin, ReprMixin, MetadataMixin, Scheme[GroupKey, ManagerKey, MemberKey]
+):
+    LIFETIME: int = 60 * 60 * 24 * 14  # two weeks
     # TODO: add lifetime setter
     _logger = logging.getLogger(__name__)
 
-    def __init__(self):
-        self.grpkey = GroupKey()
-        self.mgrkey = ManagerKey()
+    def __init__(self) -> None:
+        self.group_key = GroupKey()
+        self.manager_key = ManagerKey()
 
-    def setup(self):
+    def setup(self) -> None:
         ## Initializes the Manager key
-        self.mgrkey.isk.set_random()
+        self.manager_key.isk.set_random()
 
         ## Initializes the Group key
         # Compute random generators g1, g, h, h1 and h2 in G1. Since G1 is a cyclic
         # group of prime order, just pick random elements
-        self.grpkey.g1.set_random()
-        self.grpkey.g.set_random()
-        self.grpkey.h.set_random()
-        self.grpkey.h1.set_random()
-        self.grpkey.h2.set_random()
-        self.grpkey.h3.set_random()
+        self.group_key.g1.set_random()
+        self.group_key.g.set_random()
+        self.group_key.h.set_random()
+        self.group_key.h1.set_random()
+        self.group_key.h2.set_random()
+        self.group_key.h3.set_random()
 
         ## Compute random generator g2 in G2. Since G2 is a cyclic group of prime
         ## order, just pick a random element
-        self.grpkey.g2.set_random()
+        self.group_key.g2.set_random()
 
         ## Add the Issuer's public key to the group key
-        self.grpkey.ipk.set_object(self.grpkey.g2 * self.mgrkey.isk)
+        self.group_key.ipk.set_object(self.group_key.g2 * self.manager_key.isk)
 
         ## I'll simplify this scheme, instead of using multiple setup calls,
         ## the first call will also generate the converter key
         ## Generate the Converter's private key
-        self.mgrkey.csk.set_random()
+        self.manager_key.csk.set_random()
 
         ## Add the Converter's public key to the group key
-        self.grpkey.cpk.set_object(self.grpkey.g * self.mgrkey.csk)
+        self.group_key.cpk.set_object(self.group_key.g * self.manager_key.csk)
 
         ## Generate the Extractor's private key
-        self.mgrkey.esk.set_random()
+        self.manager_key.esk.set_random()
 
         ## Add the Extractor's public key to the group key
-        self.grpkey.epk.set_object(self.grpkey.g * self.mgrkey.esk)
+        self.group_key.epk.set_object(self.group_key.g * self.manager_key.esk)
 
-    def join_mgr(self, message=None):
+    def join_mgr(self, message: dict[str, Any] | None = None) -> dict[str, Any]:
         ret = {"status": "error"}
         if message is None:
             ## Send a random element to the member
             n = G1.from_random()
             ret["status"] = "success"
             ret["n"] = n.to_b64()
-            ret["phase"] = 1
+            ret["phase"] = 1  # type: ignore
             ## TODO: This value should be saved in some place to avoid replay attack
         else:
             if not isinstance(message, dict):
@@ -172,7 +254,7 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
                 proof = spk.DiscreteLogProof.from_b64(message["pi"])
 
                 if spk.discrete_log_verify(
-                    H, self.grpkey.h1, proof, n.to_bytes()
+                    H, self.group_key.h1, proof, n.to_bytes()
                 ):
                     ## Pick x and s at random from Z*_p
                     x = Fr.from_random()
@@ -188,10 +270,10 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
                     d = Fr.from_hash(h.digest())
 
                     ## Set A = (H+h_2*s+h3*d+g_1)*((isk+x)**-1)
-                    h2s = self.grpkey.h2 * s
-                    h3d = self.grpkey.h3 * d
-                    A = (H + h2s + h3d + self.grpkey.g1) * ~(
-                        self.mgrkey.isk + x
+                    h2s = self.group_key.h2 * s
+                    h3d = self.group_key.h3 * d
+                    A = (H + h2s + h3d + self.group_key.g1) * ~(
+                        self.manager_key.isk + x
                     )
 
                     ## Mout = (A,x,s,l)
@@ -207,12 +289,14 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
                     self._logger.debug("spk.dlog_G1_verify failed")
             else:
                 ret["message"] = (
-                    f"Phase not supported for {self.__class__.__name__}"
+                    f"Phase not supported for {self.__class__.__name__}{self._name.upper()}"
                 )
                 self._logger.error(ret["message"])
         return ret
 
-    def join_mem(self, message, key):
+    def join_mem(
+        self, message: dict[str, Any], member_key: MemberKey
+    ) -> dict[str, str]:
         ret = {"status": "error"}
         if not isinstance(message, dict):
             ret["message"] = "Invalid message type. Expected dict"
@@ -224,48 +308,55 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
             n = G1.from_b64(message["n"])
 
             ## Compute member's secret key y at random
-            key.y.set_random()
+            member_key.y.set_random()
 
             ## Compute the member's public key
-            key.H.set_object(self.grpkey.h1 * key.y)
+            member_key.H.set_object(self.group_key.h1 * member_key.y)
 
             ## Compute the SPK
             proof = spk.discrete_log_sign(
-                key.H, self.grpkey.h1, key.y, n.to_bytes()
+                member_key.H, self.group_key.h1, member_key.y, n.to_bytes()
             )
 
             ## Build the output message
             ret["status"] = "success"
             ret["n"] = n.to_b64()
-            ret["H"] = key.H.to_b64()
+            ret["H"] = member_key.H.to_b64()
             ret["pi"] = proof.to_b64()
             ret["phase"] = phase + 1
         elif phase == 3:
             ## Check correctness of computation and update memkey
 
             # Min = (A,x,s,l)
-            key.A.set_b64(message["A"])
-            key.x.set_b64(message["x"])
-            key.s.set_b64(message["s"])
-            key.l = int(message["l"])
+            member_key.A.set_b64(message["A"])
+            member_key.x.set_b64(message["x"])
+            member_key.s.set_b64(message["s"])
+            member_key.l = int(message["l"])
 
             ## Recompute h2s from s
-            key.h2s.set_object(self.grpkey.h2 * key.s)
+            member_key.h2s.set_object(self.group_key.h2 * member_key.s)
 
             ## Recompute d and h3d from l
-            h = hashlib.sha256(str(key.l).encode())
-            key.d.set_hash(h.digest())
-            key.h3d.set_object(self.grpkey.h3 * key.d)
+            h = hashlib.sha256(str(member_key.l).encode())
+            member_key.d.set_hash(h.digest())
+            member_key.h3d.set_object(self.group_key.h3 * member_key.d)
 
             ## Check correctness
             # A must not be 1 (since we use additive notation for G1,
             # it must not be 0)
-            if not key.A.is_zero():
-                e1 = (GT.pairing(key.A, self.grpkey.g2)) ** key.x
-                e2 = GT.pairing(key.A, self.grpkey.ipk)
+            if not member_key.A.is_zero():
+                e1 = (
+                    GT.pairing(member_key.A, self.group_key.g2)
+                ) ** member_key.x
+                e2 = GT.pairing(member_key.A, self.group_key.ipk)
                 e4 = e1 * e2
-                aux = key.H + key.h2s + key.h3d + self.grpkey.g1
-                e3 = GT.pairing(aux, self.grpkey.g2)
+                aux = (
+                    member_key.H
+                    + member_key.h2s
+                    + member_key.h3d
+                    + self.group_key.g1
+                )
+                e3 = GT.pairing(aux, self.group_key.g2)
                 if e4 == e3:
                     ret["status"] = "success"
                 else:
@@ -278,12 +369,12 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
                 self._logger.debug("A is zero")
         else:
             ret["message"] = (
-                f"Phase not supported for {self.__class__.__name__}"
+                f"Phase not supported for {self.__class__.__name__}{self._name.upper()}"
             )
             self._logger.error(ret["message"])
         return ret
 
-    def sign(self, message, key):
+    def sign(self, message: str, member_key: MemberKey) -> dict[str, Any]:
         message = str(message)
         # alpha, r1, r2 \in_R Z_p
         alpha = Fr.from_random()
@@ -292,61 +383,65 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
 
         # nym1 = g1*alpha
         sig = Signature()
-        sig.nym1.set_object(self.grpkey.g * alpha)
+        sig.nym1.set_object(self.group_key.g * alpha)
 
         # nym2 = cpk*alpha+h*y
-        sig.nym2.set_object((self.grpkey.cpk * alpha) + (self.grpkey.h * key.y))
+        sig.nym2.set_object(
+            (self.group_key.cpk * alpha) + (self.group_key.h * member_key.y)
+        )
 
         ## Add extra encryption of h^y with epk
         alpha2 = Fr.from_random()
 
         # ehy1 = g*alpha2
-        sig.ehy1.set_object(self.grpkey.g * alpha2)
+        sig.ehy1.set_object(self.group_key.g * alpha2)
 
         # ehy2 = epk*alpha2+h*y
         sig.ehy2.set_object(
-            (self.grpkey.epk * alpha2) + (self.grpkey.h * key.y)
+            (self.group_key.epk * alpha2) + (self.group_key.h * member_key.y)
         )
 
         # AA = A*r1
-        sig.AA.set_object(key.A * r1)
+        sig.AA.set_object(member_key.A * r1)
 
         ## Good thing we precomputed much of this...
         # aux = (g1+h1*y+h2*s+h3*d)*r1
-        aux = (self.grpkey.g1 + key.H + key.h2s + key.h3d) * r1
+        aux = (
+            self.group_key.g1 + member_key.H + member_key.h2s + member_key.h3d
+        ) * r1
         # A_ = AA^{-x}(g1+h*y+h2*s+h3*d)*r1
-        sig.A_.set_object(sig.AA * -key.x + aux)
+        sig.A_.set_object(sig.AA * -member_key.x + aux)
 
         # d = (g1+h1*y+h2*s+h3*d)*r1+h2*-r2
-        sig.d.set_object(aux + (self.grpkey.h2 * -r2))
+        sig.d.set_object(aux + (self.group_key.h2 * -r2))
 
         # r3 = r1**-1
         r3 = ~r1
 
         # ss = s - r2*r3
-        ss = key.s - (r2 * r3)
+        ss = member_key.s - (r2 * r3)
 
         ## Auxiliar variables for the spk
-        aux_Zr = -key.x
+        aux_Zr = -member_key.x
         ss = -ss
-        negy = -key.y
+        negy = -member_key.y
         A_d = sig.A_ - sig.d
 
         # g1h3d = g1*h3^d
-        g1h3d = self.grpkey.g1 + key.h3d
+        g1h3d = self.group_key.g1 + member_key.h3d
 
         y = [sig.nym1, sig.nym2, A_d, g1h3d, sig.ehy1, sig.ehy2]
         g = [
-            self.grpkey.g,
-            self.grpkey.cpk,
-            self.grpkey.h,
+            self.group_key.g,
+            self.group_key.cpk,
+            self.group_key.h,
             sig.AA,
-            self.grpkey.h2,
+            self.group_key.h2,
             sig.d,
-            self.grpkey.h1,
-            self.grpkey.epk,
+            self.group_key.h1,
+            self.group_key.epk,
         ]
-        x = [aux_Zr, key.y, r2, r3, ss, alpha, negy, alpha2]
+        x = [aux_Zr, member_key.y, r2, r3, ss, alpha, negy, alpha2]
         i = [
             (5, 0),  # alpha, g
             (5, 1),  # alpha, cpk
@@ -364,7 +459,7 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
 
         ## The SPK'ed message becomes the message to sign concatenated with the
         ## credential expiration date
-        sig.expiration = key.l
+        sig.expiration = member_key.l
         proof = spk.general_representation_sign(
             y, g, x, i, prods, f"{sig.expiration}|{message}"
         )
@@ -376,7 +471,7 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
             "signature": sig.to_b64(),
         }
 
-    def verify(self, message, signature):
+    def verify(self, message: str, signature: str) -> dict[str, Any]:
         message = str(message)
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
@@ -389,18 +484,18 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
 
         h = hashlib.sha256(str(sig.expiration).encode())
         expiration = Fr.from_hash(h.digest())
-        g1h3d = (self.grpkey.h3 * expiration) + self.grpkey.g1
+        g1h3d = (self.group_key.h3 * expiration) + self.group_key.g1
 
         y = [sig.nym1, sig.nym2, A_d, g1h3d, sig.ehy1, sig.ehy2]
         g = [
-            self.grpkey.g,
-            self.grpkey.cpk,
-            self.grpkey.h,
+            self.group_key.g,
+            self.group_key.cpk,
+            self.group_key.h,
             sig.AA,
-            self.grpkey.h2,
+            self.group_key.h2,
             sig.d,
-            self.grpkey.h1,
-            self.grpkey.epk,
+            self.group_key.h1,
+            self.group_key.epk,
         ]
         i = [
             (5, 0),  # alpha, g
@@ -427,9 +522,11 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
             self._logger.debug("spk.rep_verify failed")
         return ret
 
-    def blind(self, message, signature, blind_key=None):
+    def blind(
+        self, message: str, signature: str, blind_key: BlindKey | None = None
+    ) -> dict[str, Any]:
         if blind_key is None:
-            blind_key = BlindKey.from_random(self.grpkey)
+            blind_key = BlindKey.from_random(self.group_key)
         message = str(message)
         sig = Signature.from_b64(signature)
 
@@ -441,17 +538,17 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
         ## Rerandomize the pseudonym encryption under the cpk and
         ## add an encryption layer for the pseudonym under the bpk
         bsig = BlindSignature()
-        bsig.nym1.set_object(sig.nym1 + (self.grpkey.g * beta))
-        bsig.nym2.set_object(self.grpkey.g * alpha)
+        bsig.nym1.set_object(sig.nym1 + (self.group_key.g * beta))
+        bsig.nym2.set_object(self.group_key.g * alpha)
         bsig.nym3.set_object(
-            sig.nym2 + (self.grpkey.cpk * beta) + (blind_key.pk * alpha)
+            sig.nym2 + (self.group_key.cpk * beta) + (blind_key.pk * alpha)
         )
 
         ##  Encrypt the (hash of the) message
         h = hashlib.sha256()
         h.update(message.encode())
         c = G1.from_hash(h.digest())
-        bsig.c1.set_object(self.grpkey.g * gamma)
+        bsig.c1.set_object(self.group_key.g * gamma)
         bsig.c2.set_object(c + (blind_key.pk * gamma))
         return {
             "status": "success",
@@ -459,9 +556,11 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
             "blind_key": blind_key.to_b64(),
         }
 
-    def convert(self, blind_signatures, blind_key_public):
+    def convert(
+        self, blind_signatures: list[str], blind_key_public: str
+    ) -> dict[str, Any]:
         r = Fr.from_random()
-        neg_csk = -self.mgrkey.csk
+        neg_csk = -self.manager_key.csk
         converted_signatures = []
         pk = G1.from_b64(blind_key_public)
         for bsig_b64 in blind_signatures:
@@ -474,12 +573,12 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
 
             ## Re-randomize nym
             csig = BlindSignature()
-            csig.nym1.set_object(cnym1p + (self.grpkey.g * r1))
+            csig.nym1.set_object(cnym1p + (self.group_key.g * r1))
             csig.nym2.set_object(cnym2p + (pk * r1))
             ## nym3 is empty (default value 0)
 
             ## Re-randomize ciphertext
-            csig.c1.set_object(bsig.c1 + (self.grpkey.g * r2))
+            csig.c1.set_object(bsig.c1 + (self.group_key.g * r2))
             csig.c2.set_object(bsig.c2 + (pk * r2))
             converted_signatures.append(csig.to_b64())
         durstenfeld_perm(converted_signatures)
@@ -488,7 +587,10 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
             "converted_signatures": converted_signatures,
         }
 
-    def unblind(self, converted_signature, blind_key):
+    @staticmethod
+    def unblind(
+        converted_signature: str, blind_key: BlindKey
+    ) -> dict[str, Any]:
         csig = BlindSignature.from_b64(converted_signature)
         ## Decrypt the pseudonym with the blinding private key
         aux_zn = -blind_key.sk
@@ -506,7 +608,7 @@ class GL19(JoinMixin, ReprMixin, SchemeInterface):
         }
 
 
-def durstenfeld_perm(input_list):
+def durstenfeld_perm(input_list: list[str]) -> None:
     """
     Uses Durstenfeld variant of the Fisher-Yates in place permutation
     algorithm to output a random permutation of the given array.

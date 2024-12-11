@@ -1,28 +1,38 @@
+# mypy: disable-error-code="misc"
+
 import importlib
 import json
 from base64 import b64decode, b64encode
+from typing import Any, KeysView, Type, TypeVar
 
+from pygroupsig.interfaces import Container
 from pygroupsig.utils.mcl import Fr
 
 _SEQ = 3
 _START = 0
 
+T = TypeVar("T", bound="Container")
+
 
 class ReprMixin:
-    def __repr__(self):
+    def __repr__(self) -> str:
         rep = json.dumps({k: str(v) for k, v in vars(self).items()})
         return f"{self.__class__} {rep}"
 
 
 class InfoMixin:
-    def info(self):
-        return (self._NAME, self._CTYPE), vars(self).keys()
+    _name: str
+    _container_name: str
+
+    def info(self) -> tuple[str, str, KeysView]:
+        return self._name, self._container_name, vars(self).keys()
 
 
+# noinspection PyUnresolvedReferences
 class B64Mixin:
-    def to_b64(self):
-        meta, var = self.info()
-        dump = {}
+    def to_b64(self) -> str:
+        scheme_name, container_name, var = self.info()  # type: ignore
+        dump: dict[str, Any] = {}
         for v in var:
             obj = getattr(self, v)
             if isinstance(obj, list):
@@ -34,13 +44,13 @@ class B64Mixin:
             else:
                 dump[v] = obj.to_b64()
         data = b64encode(json.dumps(dump).encode()).decode()
-        if meta[1] == "signature":
-            msg = {"scheme": meta[0], "signature": data}
+        if container_name == "signature":
+            msg = {"scheme": scheme_name, "signature": data}
         else:
-            msg = {"scheme": meta[0], "type": meta[1], "key": data}
+            msg = {"scheme": scheme_name, "type": container_name, "key": data}
         return b64encode(json.dumps(msg).encode()).decode()
 
-    def set_b64(self, s):
+    def set_b64(self, s: str | bytes) -> None:
         if isinstance(s, str):
             s = s.encode()
         elif not isinstance(s, bytes):
@@ -66,31 +76,33 @@ class B64Mixin:
                 obj.set_b64(it[k])
 
     @classmethod
-    def from_b64(cls, s):
+    def from_b64(cls: Type[T], s: str | bytes) -> T:
         ret = cls()
         ret.set_b64(s)
         return ret
 
 
 class JoinMixin:
-    def join_seq(self):
+    @staticmethod
+    def join_seq() -> int:
         return _SEQ
 
-    def join_start(self):
+    @staticmethod
+    def join_start() -> int:
         return _START
 
 
 class ContainerDict(dict):
-    def to_b64(self):
+    def to_b64(self) -> str:
         exp = {}
         for el, values in self.items():
             exp[el] = [
                 f"{v.__class__.__module__}.{v.__class__.__name__}|{v.to_b64()}"
                 for v in values
             ]
-        return b64encode(json.dumps(exp).encode())
+        return b64encode(json.dumps(exp).encode()).decode()
 
-    def set_b64(self, s):
+    def set_b64(self, s: str | bytes) -> None:
         if isinstance(s, str):
             s = s.encode()
         elif not isinstance(s, bytes):
@@ -108,7 +120,7 @@ class ContainerDict(dict):
             self[mem_id] = tuple(values)
 
     @classmethod
-    def from_b64(cls, s):
+    def from_b64(cls: Type[T], s: str | bytes) -> T:
         ret = cls()
         ret.set_b64(s)
         return ret
@@ -116,3 +128,23 @@ class ContainerDict(dict):
 
 GML = ContainerDict
 CRL = ContainerDict
+
+
+class MetadataGroupKeyMixin:
+    _container_name = "group"
+
+
+class MetadataManagerKeyMixin:
+    _container_name = "manager"
+
+
+class MetadataMemberKeyMixin:
+    _container_name = "member"
+
+
+class MetadataBlindKeyMixin:
+    _container_name = "blind"
+
+
+class MetadataSignatureMixin:
+    _container_name = "signature"

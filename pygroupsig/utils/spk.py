@@ -1,13 +1,20 @@
+# mypy: disable-error-code="call-arg,assignment,index,operator"
+
 import hashlib
 import json
 from base64 import b64decode, b64encode
+from typing import Any, Type, TypeVar
+
+from typing_extensions import Self
 
 from pygroupsig.utils.helpers import ReprMixin
-from pygroupsig.utils.mcl import G2, GT, Fr
+from pygroupsig.utils.mcl import G1, G2, GT, Fr
+
+T = TypeVar("T")
 
 
 class B64Mixin:
-    def to_b64(self):
+    def to_b64(self) -> str:
         dump = {}
         for v in vars(self):
             obj = getattr(self, v)
@@ -20,7 +27,7 @@ class B64Mixin:
                 dump[v] = obj.to_b64()
         return b64encode(json.dumps(dump).encode()).decode()
 
-    def set_b64(self, s):
+    def set_b64(self, s: str | bytes) -> None:
         if isinstance(s, str):
             s = s.encode()
         elif not isinstance(s, bytes):
@@ -41,12 +48,12 @@ class B64Mixin:
                 obj.set_b64(data[k])
 
     @classmethod
-    def from_b64(cls, s):
+    def from_b64(cls: Type[T], s: str | bytes) -> T:
         ret = cls()
-        ret.set_b64(s)
+        ret.set_b64(s)  # type: ignore
         return ret
 
-    def set_object(self, y):
+    def set_object(self, y: Self) -> None:
         for v in vars(y):
             s_obj = getattr(y, v)
             d_obj = getattr(self, v)
@@ -59,7 +66,10 @@ class B64Mixin:
 class DiscreteLogProof(B64Mixin, ReprMixin):
     """Data structure for convenional discrete log proofs"""
 
-    def __init__(self):
+    c: Fr
+    s: Fr
+
+    def __init__(self) -> None:
         self.c = Fr()
         self.s = Fr()
 
@@ -67,7 +77,11 @@ class DiscreteLogProof(B64Mixin, ReprMixin):
 class DiscreteLogProof2(B64Mixin, ReprMixin):
     """Data structure for convenional discrete log proofs"""
 
-    def __init__(self):
+    c: Fr
+    s: Fr
+    x: list[str]
+
+    def __init__(self) -> None:
         self.c = Fr()
         self.s = Fr()
         self.x = []
@@ -80,7 +94,10 @@ NizkProof = DiscreteLogProof
 class GeneralRepresentationProof(B64Mixin, ReprMixin):
     """Data structure for general representation proofs"""
 
-    def __init__(self):
+    c: Fr
+    s: list[Fr]
+
+    def __init__(self) -> None:
         self.c = Fr()
         self.s = []
 
@@ -88,7 +105,10 @@ class GeneralRepresentationProof(B64Mixin, ReprMixin):
 class PairingHomomorphismProof(B64Mixin, ReprMixin):
     """Data structure for pairing homomorphism proofs"""
 
-    def __init__(self):
+    c: Fr
+    s: G2
+
+    def __init__(self) -> None:
         self.c = Fr()
         self.s = G2()
 
@@ -96,13 +116,25 @@ class PairingHomomorphismProof(B64Mixin, ReprMixin):
 class PairingHomomorphismProof2(B64Mixin, ReprMixin):
     """Data structure for pairing homomorphism proofs"""
 
-    def __init__(self):
+    c: Fr
+    s: G2
+    tau: GT
+
+    def __init__(self) -> None:
         self.c = Fr()
         self.s = G2()
         self.tau = GT()
 
 
-def general_representation_sign(y, g, x, i, prods, b_n, manual=False):
+def general_representation_sign(
+    y: list[Any],
+    g: list[Any],
+    x: list[Fr],
+    i: list[tuple[int, int]],
+    prods: list[int],
+    b_n: str | bytes,
+    manual: bool = False,
+) -> GeneralRepresentationProof:
     r = [Fr.from_random() for _ in x]
 
     ## Compute the challenges according to the relations defined by
@@ -168,12 +200,19 @@ def general_representation_sign(y, g, x, i, prods, b_n, manual=False):
     ## Compute challenge responses
     for idx, j in enumerate(x):
         # si = ri - cxi
-        cx = proof.c * j
-        proof.s.append(r[idx] - cx)
+        proof.s.append(r[idx] - (proof.c * j))
     return proof
 
 
-def general_representation_verify(y, g, i, prods, proof, b_n, manual=False):
+def general_representation_verify(
+    y: list[Any],
+    g: list[Any],
+    i: list[tuple[int, int]],
+    prods: list[int],
+    proof: GeneralRepresentationProof,
+    b_n: str | bytes,
+    manual: bool = False,
+) -> bool:
     ## Compute the challenge products -- manually until fixing issue23
     prod = []
     if not manual:
@@ -240,7 +279,9 @@ def general_representation_verify(y, g, i, prods, proof, b_n, manual=False):
     return c == proof.c
 
 
-def discrete_log_sign(G, g, x, b_n):
+def discrete_log_sign(
+    G: G1, g: G1, x: Fr, b_n: str | bytes
+) -> DiscreteLogProof:
     ## Pick random r and compute g*r mod q
     r = Fr.from_random()
     gr = g * r
@@ -263,7 +304,9 @@ def discrete_log_sign(G, g, x, b_n):
     return proof
 
 
-def discrete_log_verify(G, g, proof, b_n):
+def discrete_log_verify(
+    G: G1, g: G1, proof: DiscreteLogProof, b_n: str | bytes
+) -> bool:
     ## If pi (proof) is correct, then pi.c must equal Hash(msg||G||g||g*pi.s+g*pi.c)
     ## Compute g*pi.s + g*pi.c
     gsGc = (g * proof.s) + (G * proof.c)
@@ -282,7 +325,9 @@ def discrete_log_verify(G, g, proof, b_n):
     return c == proof.c
 
 
-def pairing_homomorphism_sign(g, G, xx, b_n):
+def pairing_homomorphism_sign(
+    g: G1, G: GT, xx: G2, b_n: str | bytes
+) -> PairingHomomorphismProof:
     ## Pick random R from G2
     rr = G2.from_random()
     ## Compute the map
@@ -306,7 +351,9 @@ def pairing_homomorphism_sign(g, G, xx, b_n):
     return proof
 
 
-def pairing_homomorphism_verify(g, G, proof, b_n):
+def pairing_homomorphism_verify(
+    g: G1, G: GT, proof: PairingHomomorphismProof, b_n: str | bytes
+) -> bool:
     ## If pi is correct, then pi.c equals Hash(msg||g||G||e(g,pi.s)/G**pi.c)
     ## Compute e(g,pi.s)/G**pi.c
     R = GT.pairing(g, proof.s) / (G**proof.c)
@@ -325,7 +372,9 @@ def pairing_homomorphism_verify(g, G, proof, b_n):
     return c == proof.c
 
 
-def pairing_homomorphism_sign2(xx, g1, g2, e1, e2, tau, b_n):
+def pairing_homomorphism_sign2(
+    xx: G2, g1: G1, g2: G1, e1: GT, e2: GT, tau: GT, b_n: str | bytes
+) -> PairingHomomorphismProof2:
     # RR1 = e(g1,rr), RR2 = e(g2,rr)
     rr = G2.from_random()
     RR1 = GT.pairing(g1, rr)
@@ -345,13 +394,16 @@ def pairing_homomorphism_sign2(xx, g1, g2, e1, e2, tau, b_n):
 
     proof = PairingHomomorphismProof2()
     proof.c.set_hash(h.digest())
+
     # s = rr + xx*c
     proof.s.set_object(rr + (xx * proof.c))
     proof.tau.set_object(tau)
     return proof
 
 
-def pairing_homomorphism_verify2(proof, g1, g2, e1, b_n):
+def pairing_homomorphism_verify2(
+    proof: PairingHomomorphismProof2, g1: G1, g2: G1, e1: GT, b_n: str | bytes
+) -> bool:
     # RR1 = e(g1,pi.s)/e1**pi.c
     RR1 = GT.pairing(g1, proof.s) / (e1**proof.c)
     # RR2 = e(g2,pi.s)/e2**pi.c
