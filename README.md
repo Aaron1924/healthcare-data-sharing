@@ -110,3 +110,24 @@ Run the following command to execute the tests:
 ```bash
 python -m unittest
 ```
+
+## Acknowledgement
+This work was supported by the European Commission under the Horizon Europe funding 
+programme, as part of the project SafeHorizon (Grant Agreement 101168562). 
+Moreover, it was supported by the European Commission under the Horizon Europe 
+Programme as part of the HEROES project (Grant Agreement number 101021801) 
+and the European Union's Internal Security Fund as part of the ALUNA project 
+(Grant Agreement number 101084929). Views and opinions expressed are however 
+those of the author(s) only and do not necessarily reflect those of the European. 
+Neither the European Union nor the granting authority can be held responsible for them.
+
+- Based on [piotrszyma/mcl-python](https://github.com/piotrszyma/mcl-python) bindings for mcl.
+- Based on [herumi/mcl](https://github.com/herumi/mcl).
+- Based on [spirs/libgroupsig](https://gitlab.gicp.es/spirs/libgroupsig) and [IBM/libgroupsig](https://github.com/IBM/libgroupsig)
+
+## LICENSE
+```
+Copyright (c) 2024 Cybersecurity and Privacy Protection Research Group (GiCP), part of Consejo Superior de Investigaciones Científicas (CSIC). All rights reserved.
+This work is licensed under the terms of the MIT license.
+```
+For a copy, see [LICENSE](LICENSE)
