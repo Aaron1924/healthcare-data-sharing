@@ -9,9 +9,11 @@ This library has been developed from scratch in Python _except_ for **mcl**.
 We have built a wrapper around the original [mcl](https://github.com/herumi/mcl)
 library written in C/C++ using Python ctypes.
 
-> The library has type hints to ease the development of new schemes. If you encounter 
-> any errors or have suggestions for improvements, please feel free to open a PR or 
+> The library has type hints to ease the development of new schemes. If you encounter
+> any errors or have suggestions for improvements, please feel free to open a PR or
 > an issue.
+
+> The library was tested in [mcl v2.00](https://github.com/herumi/mcl/tree/v2.00)
 
 To build **mcl**, run the following commands.
 
@@ -22,13 +24,13 @@ cmake -B build .
 make -C build
 ```
 
-You need to export an environment variable, `MCL_LIB_PATH`, pointing to the **lib** folder 
+You need to export an environment variable, `MCL_LIB_PATH`, pointing to the **lib** folder
 ```bash
 export MCL_LIB_PATH=$PWD/mcl/build/lib
 ```
 
 ## Usage
-You can instantiate the different schemes using the `group` class factory or by directly 
+You can instantiate the different schemes using the `group` class factory or by directly
 using the specific class for each scheme:
 
 ```python
@@ -64,7 +66,7 @@ s_msg = gm.sign("Hello world!", mk)
 v_msg = gm.verify("Hello world!", s_msg["signature"])
 ```
 
-The functions `setup`, `join_mgr`, `join_mem`, `sign` and `verify` are common to all 
+The functions `setup`, `join_mgr`, `join_mem`, `sign` and `verify` are common to all
 schemes. Some schemes also implement additional functionalities:
 
 ### BBS04
@@ -112,13 +114,13 @@ python -m unittest
 ```
 
 ## Acknowledgement
-This work was supported by the European Commission under the Horizon Europe funding 
-programme, as part of the project SafeHorizon (Grant Agreement 101168562). 
-Moreover, it was supported by the European Commission under the Horizon Europe 
-Programme as part of the HEROES project (Grant Agreement number 101021801) 
-and the European Union's Internal Security Fund as part of the ALUNA project 
-(Grant Agreement number 101084929). Views and opinions expressed are however 
-those of the author(s) only and do not necessarily reflect those of the European. 
+This work was supported by the European Commission under the Horizon Europe funding
+programme, as part of the project SafeHorizon (Grant Agreement 101168562).
+Moreover, it was supported by the European Commission under the Horizon Europe
+Programme as part of the HEROES project (Grant Agreement number 101021801)
+and the European Union's Internal Security Fund as part of the ALUNA project
+(Grant Agreement number 101084929). Views and opinions expressed are however
+those of the author(s) only and do not necessarily reflect those of the European.
 Neither the European Union nor the granting authority can be held responsible for them.
 
 - Based on [piotrszyma/mcl-python](https://github.com/piotrszyma/mcl-python) bindings for mcl.

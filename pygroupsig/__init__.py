@@ -41,7 +41,6 @@ __all__ = [
     "ManagerKeyDL21SEQ",
     "MemberKeyDL21SEQ",
     "SignatureDL21SEQ",
-    "load_library",
 ]
 
 from .definitions import group, key, signature
@@ -83,3 +82,5 @@ from .schemes.ps16 import Signature as SignaturePS16
 from .utils.constants import load_library
 from .utils.helpers import CRL as crl
 from .utils.helpers import GML as gml
+
+load_library()

@@ -2,14 +2,10 @@ import unittest
 from pathlib import Path
 
 import pygroupsig.utils.constants as ct
-from pygroupsig import load_library
 from pygroupsig.utils.mcl import G1, G2, GT, Fp, Fp2, Fr
 
 
 class FBaseTest(unittest.TestCase):
-    def setUp(self):
-        load_library()
-
     def _testByteSize(self, cls, value):
         self.assertEqual(cls.byte_size(), value)
 
@@ -448,7 +444,6 @@ class TestFp2(FBaseTest):
 
 class GBaseTest(unittest.TestCase):
     def setUp(self):
-        load_library()
         self.h = (
             "f0c8dc42d5a51db0c326916d10392adbf76b14ae99d489ff3560611a97420eee"
         )

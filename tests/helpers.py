@@ -1,7 +1,7 @@
 import logging
 import unittest
 
-from pygroupsig import crl, gml, group, key, load_library, signature
+from pygroupsig import crl, gml, group, key, signature
 from pygroupsig.definitions import SCHEMES
 
 for scheme in SCHEMES:
@@ -12,7 +12,6 @@ class SetUpMixin:
     scheme: str
 
     def setUp(self):
-        load_library()
         if self.scheme is None:
             raise ValueError("Missing scheme")
         self.group = group(self.scheme)()
@@ -48,7 +47,6 @@ class TestBase(AddMemberMixin):
     scheme: str
 
     def setUp(self):
-        load_library()
         if self.scheme is None:
             raise ValueError("Missing scheme")
         self.group = group(self.scheme)()
