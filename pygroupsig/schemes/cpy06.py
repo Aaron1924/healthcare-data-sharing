@@ -76,6 +76,20 @@ class ManagerKey(
         # Exponent for generating member keys. \gamma \in_R Z^*_p
         self.gamma = Fr()
 
+class RevocationManagerKey(
+    B64Mixin,
+    InfoMixin,
+    ReprMixin,
+    MetadataManagerKeyMixin,
+    MetadataMixin,
+    Container,
+):
+    xi1: Fr  # Revocation manager's share of ξ₁
+    xi2: Fr  # Revocation manager's share of ξ₂
+
+    def __init__(self) -> None:
+        self.xi1 = Fr()  # ξ₁_rev = ξ₁ - ξ₁_group (additive share)
+        self.xi2 = Fr()  # ξ₂_rev = ξ₂ - ξ₂_group (additive share)
 
 class MemberKey(
     B64Mixin,
@@ -142,6 +156,7 @@ class Group(
     crl: CRL
 
     def __init__(self) -> None:
+        self.revocation_manager_key = RevocationManagerKey()
         self.group_key = GroupKey()
         self.manager_key = ManagerKey()
         self._g1 = G1.from_generator()
@@ -155,7 +170,11 @@ class Group(
         # \xi_2 \in_R Z^*_p
         self.manager_key.xi2.set_random()
         # \gamma \in_R Z^*_p
+        self.revocation_manager_key.xi1.set_random()  # ξ₁_rev
+        self.revocation_manager_key.xi2.set_random()  # ξ₂_rev
         self.manager_key.gamma.set_random()
+        xi1_total = self.manager_key.xi1 + self.revocation_manager_key.xi1
+        xi2_total = self.manager_key.xi2 + self.revocation_manager_key.xi2
 
         ## Create group public key
         # Q \in_R G1
@@ -168,10 +187,8 @@ class Group(
         while self.group_key.z.is_zero():
             self.group_key.z.set_random()
         # X = Z*(xi_1**-1)
-        self.group_key.x.set_object(self.group_key.z * ~self.manager_key.xi1)
-        # Y = Z*(xi_2**-1)
-        self.group_key.y.set_object(self.group_key.z * ~self.manager_key.xi2)
-
+        self.group_key.x.set_object(self.group_key.z * ~xi1_total)
+        self.group_key.y.set_object(self.group_key.z * ~xi2_total)
         ## For computation optimizations
         # e1 = e(g1, W)
         self.group_key.e1.set_object(GT.pairing(self._g1, self.group_key.w))
@@ -482,26 +499,44 @@ class Group(
             self._logger.debug("c != sig.c")
         return ret
 
-    def open(self, signature: str) -> dict[str, Any]:
+    def open(self, signature: str,group_manager_partial: dict[str, Any] = None, revocation_manager_partial: dict[str, Any] = None) -> dict[str, Any]:
         ret = {"status": "fail"}
         sig = Signature.from_b64(signature)
         ## Recover the signer's A as: A = T3-(T1*xi1 + T2*xi2)
         # A = T1*xi1 + T2*xi2 =
-        e = (G1 * 2)()
-        e[0].set_object(sig.T1)
-        e[1].set_object(sig.T2)
-        s = (Fr * 2)()
-        s[0].set_object(self.manager_key.xi1)
-        s[1].set_object(self.manager_key.xi2)
-        A = G1.muln(e, s)
-        # A = T3-A
-        A = sig.T3 - A
-        for mem_id, (open_trap, _) in self.gml.items():
-            if A == open_trap:
-                ret["status"] = "success"
-                ret["id"] = mem_id
-                break
-        return ret
+        if group_manager_partial is None:
+        # Group Manager computes partial decryption
+            partial_g = {
+                "T1_xi": self.manager_key.xi1,
+                "T2_xi": self.manager_key.xi2
+            }
+            return {"status": "partial", "partial_g": partial_g}
+        elif revocation_manager_partial is None:
+        # Revocation Manager computes partial decryption
+            partial_r = {
+                "T1_xi": self.revocation_manager_key.xi1,
+                "T2_xi": self.revocation_manager_key.xi2
+            }
+            return {"status": "partial", "partial_r": partial_r}
+        else:
+            xi1_total = group_manager_partial["T1_xi"] + revocation_manager_partial["T1_xi"]
+            xi2_total = group_manager_partial["T2_xi"] + revocation_manager_partial["T2_xi"]
+
+            e = (G1 * 2)()
+            e[0].set_object(sig.T1)
+            e[1].set_object(sig.T2)
+            s = (Fr * 2)()
+            s[0].set_object(xi1_total)
+            s[1].set_object(xi2_total)
+            A = G1.muln(e, s)
+            A = sig.T3 - A
+
+        # Lookup A in GML
+            for mem_id, (open_trap, _) in self.gml.items():
+                if A == open_trap:
+                    return {"status": "success", "id": mem_id}
+            return {"status": "fail"}
+            
 
     def reveal(self, member_id: str) -> dict[str, Any]:
         ret = {"status": "fail"}
@@ -549,7 +584,7 @@ class Group(
 
         proof = spk.NizkProof()
         ## (2) Calculate c = hash((e(g1,T4)^r)[1] || (e(g1,T4))[1] || ... ||
-        ## (e(g1,T4)^r)[n] || (e(g1,T4))[n] )
+            ## (e(g1,T4)^r)[n] || (e(g1,T4))[n] )
         proof.c.set_hash(h.digest())
         ## (3) To end, get s = r - c*x
         proof.s.set_object(r + (proof.c * member_key.x))
