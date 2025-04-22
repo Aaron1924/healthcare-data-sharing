@@ -5,6 +5,7 @@ import os
 import datetime
 import time
 import base64
+import hashlib
 from web3 import Web3
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
@@ -540,6 +541,18 @@ else:
                                 }
                             )
 
+                            # If the first URL fails, try the alternative URL
+                            if response.status_code == 404:
+                                print("Trying alternative API URL...")
+                                response = requests.post(
+                                    f"{API_URL}/api/purchase/request",
+                                    json={
+                                        "template_hash": template_hash,
+                                        "amount": amount,
+                                        "wallet_address": st.session_state.wallet_address
+                                    }
+                                )
+
                             if response.status_code == 200:
                                 result = response.json()
                                 st.success("Purchase request submitted successfully!")
@@ -554,65 +567,180 @@ else:
             # Section for verifying and finalizing purchases
             st.subheader("Verify and Finalize Purchases")
 
+            # Explanation of the verification process
+            with st.expander("About the Verification Process", expanded=False):
+                st.markdown("""
+                **What happens during verification?**
+
+                1. The system retrieves the template package from IPFS using the Template CID
+                2. It verifies the hospital's signature on the template package
+                3. For each patient's data in the template:
+                   - The Merkle proofs are verified to ensure data integrity
+                   - The group signature is verified to ensure the data was signed by a legitimate doctor
+                4. If all verifications pass, you can finalize the purchase and release payment
+
+                This verification happens off-chain to save gas costs, but the results are cryptographically secure.
+                """)
+
             col1, col2 = st.columns(2)
             with col1:
                 request_id = st.text_input("Request ID")
+                if "current_request_id" in st.session_state:
+                    st.caption(f"Your last request ID: {st.session_state.current_request_id}")
             with col2:
                 template_cid = st.text_input("Template CID")
+                st.caption("Enter the CID provided by the hospital")
 
             if st.button("Verify Purchase (Off-Chain)"):
                 if not request_id or not template_cid:
                     st.error("Please enter both Request ID and Template CID")
                 else:
-                    # Call API to verify purchase off-chain
-                    try:
-                        response = requests.post(
-                            f"{API_URL}/purchase/verify",
-                            json={
-                                "request_id": request_id,
-                                "template_cid": template_cid,
-                                "wallet_address": st.session_state.wallet_address
-                            }
-                        )
+                    # Show verification steps
+                    with st.status("Verifying purchase...", expanded=True) as status:
+                        st.write("Retrieving template package from IPFS...")
+                        time.sleep(0.5)  # Simulate delay
 
-                        if response.status_code == 200:
-                            result = response.json()
-                            if result["verified"]:
-                                st.success("Verification successful!")
-                                st.session_state.verification_result = result
-                                st.session_state.verified_request_id = request_id
-                                st.info("You can now finalize the purchase on-chain")
-
-                                # Display recipients
-                                st.subheader("Payment Recipients")
-                                for i, recipient in enumerate(result["recipients"]):
-                                    st.text(f"{i+1}. {recipient}")
-                            else:
-                                st.error("Verification failed! The data does not meet the requirements.")
-                        else:
-                            st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
-
-            # Finalize purchase button (only shown after verification)
-            if hasattr(st.session_state, 'verification_result') and hasattr(st.session_state, 'verified_request_id'):
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("Finalize Purchase (Approve)"):
-                        # Call API to finalize purchase with approval
+                        # Call API to verify purchase off-chain
                         try:
                             response = requests.post(
-                                f"{API_URL}/purchase/finalize",
+                                f"{API_URL}/purchase/verify",
                                 json={
-                                    "request_id": st.session_state.verified_request_id,
-                                    "approved": True,
-                                    "recipients": st.session_state.verification_result["recipients"],
+                                    "request_id": request_id,
+                                    "template_cid": template_cid,
                                     "wallet_address": st.session_state.wallet_address
                                 }
                             )
 
+                            # If the first URL fails, try the alternative URL
+                            if response.status_code == 404:
+                                print("Trying alternative API URL...")
+                                response = requests.post(
+                                    f"{API_URL}/api/purchase/verify",
+                                    json={
+                                        "request_id": request_id,
+                                        "template_cid": template_cid,
+                                        "wallet_address": st.session_state.wallet_address
+                                    }
+                                )
+
+                            st.write("Verifying hospital signature...")
+                            time.sleep(0.5)  # Simulate delay
+
+                            st.write("Verifying Merkle proofs...")
+                            time.sleep(0.5)  # Simulate delay
+
+                            st.write("Verifying group signatures...")
+                            time.sleep(0.5)  # Simulate delay
+
                             if response.status_code == 200:
-                                st.success("Purchase finalized successfully! Payment has been distributed.")
+                                result = response.json()
+                                if result["verified"]:
+                                    status.update(label="Verification complete!", state="complete")
+                                    st.success("Verification successful!")
+                                    st.session_state.verification_result = result
+                                    st.session_state.verified_request_id = request_id
+
+                                    # Display template size if available
+                                    if "template_size" in result:
+                                        st.info(f"Template package size: {result['template_size']} bytes")
+
+                                    st.info("You can now finalize the purchase on-chain")
+
+                                    # Display recipients in a nicer format
+                                    st.subheader("Payment Recipients")
+                                    st.write("The following addresses will receive payment if you approve:")
+
+                                    for i, recipient in enumerate(result["recipients"]):
+                                        # Check if it's a known address
+                                        recipient_name = "Unknown"
+                                        for name, info in TEST_ACCOUNTS.items():
+                                            if info["address"].lower() == recipient.lower():
+                                                recipient_name = f"{name} ({info['role']})"
+                                                break
+
+                                        st.markdown(f"**{i+1}.** `{recipient}` - {recipient_name}")
+
+                                    # Display payment distribution
+                                    st.subheader("Payment Distribution")
+                                    total_recipients = len(result["recipients"])
+                                    if total_recipients > 0:
+                                        amount_per_recipient = 0.1 / total_recipients  # Assuming 0.1 ETH total
+                                        st.write(f"Each recipient will receive approximately {amount_per_recipient:.4f} ETH")
+                                else:
+                                    status.update(label="Verification failed", state="error")
+                                    st.error(f"Verification failed! {result.get('message', 'The data does not meet the requirements.')}")
+                            else:
+                                status.update(label="Verification failed", state="error")
+                                st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+                        except Exception as e:
+                            status.update(label="Verification failed", state="error")
+                            st.error(f"Error: {str(e)}")
+
+            # Finalize purchase section (only shown after verification)
+            if hasattr(st.session_state, 'verification_result') and hasattr(st.session_state, 'verified_request_id'):
+                st.markdown("---")
+                st.subheader("Finalize Purchase")
+                st.info("The verification was successful. You can now finalize the purchase on-chain.")
+
+                # Display a summary of the purchase
+                with st.expander("Purchase Summary", expanded=True):
+                    st.markdown(f"**Request ID:** {st.session_state.verified_request_id}")
+                    st.markdown(f"**Total Recipients:** {len(st.session_state.verification_result['recipients'])}")
+
+                    # Calculate total payment
+                    total_payment = 0.1  # Assuming 0.1 ETH total
+                    st.markdown(f"**Total Payment:** {total_payment} ETH")
+
+                    # Calculate payment per recipient
+                    recipients_count = len(st.session_state.verification_result['recipients'])
+                    if recipients_count > 0:
+                        payment_per_recipient = total_payment / recipients_count
+                        st.markdown(f"**Payment per Recipient:** {payment_per_recipient:.4f} ETH")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Approve and Pay", type="primary"):
+                        # Show a confirmation dialog
+                        st.write("Processing payment transaction...")
+
+                        # Call API to finalize purchase with approval
+                        try:
+                            with st.spinner("Submitting transaction to the blockchain..."):
+                                response = requests.post(
+                                    f"{API_URL}/purchase/finalize",
+                                    json={
+                                        "request_id": st.session_state.verified_request_id,
+                                        "approved": True,
+                                        "recipients": st.session_state.verification_result["recipients"],
+                                        "wallet_address": st.session_state.wallet_address
+                                    }
+                                )
+
+                                # If the first URL fails, try the alternative URL
+                                if response.status_code == 404:
+                                    print("Trying alternative API URL...")
+                                    response = requests.post(
+                                        f"{API_URL}/api/purchase/finalize",
+                                        json={
+                                            "request_id": st.session_state.verified_request_id,
+                                            "approved": True,
+                                            "recipients": st.session_state.verification_result["recipients"],
+                                            "wallet_address": st.session_state.wallet_address
+                                        }
+                                    )
+
+                            if response.status_code == 200:
+                                result = response.json()
+                                st.success("Purchase finalized successfully!")
+
+                                # Display transaction details
+                                st.markdown(f"**Transaction Hash:** `{result.get('transaction_hash', 'N/A')}`")
+                                st.markdown(f"**Message:** {result.get('message', 'Payment has been distributed.')}")
+
+                                # Show a nice confirmation message with details
+                                st.balloons()
+                                st.success(f"You have successfully purchased data from {len(st.session_state.verification_result['recipients'])} providers!")
+
                                 # Clear the verification result
                                 del st.session_state.verification_result
                                 del st.session_state.verified_request_id
@@ -622,21 +750,44 @@ else:
                             st.error(f"Error: {str(e)}")
 
                 with col2:
-                    if st.button("Finalize Purchase (Reject)"):
+                    if st.button("Reject and Refund"):
+                        # Show a confirmation dialog
+                        st.write("Processing refund transaction...")
+
                         # Call API to finalize purchase with rejection
                         try:
-                            response = requests.post(
-                                f"{API_URL}/purchase/finalize",
-                                json={
-                                    "request_id": st.session_state.verified_request_id,
-                                    "approved": False,
-                                    "recipients": [],
-                                    "wallet_address": st.session_state.wallet_address
-                                }
-                            )
+                            with st.spinner("Submitting transaction to the blockchain..."):
+                                response = requests.post(
+                                    f"{API_URL}/purchase/finalize",
+                                    json={
+                                        "request_id": st.session_state.verified_request_id,
+                                        "approved": False,
+                                        "recipients": [],
+                                        "wallet_address": st.session_state.wallet_address
+                                    }
+                                )
+
+                                # If the first URL fails, try the alternative URL
+                                if response.status_code == 404:
+                                    print("Trying alternative API URL...")
+                                    response = requests.post(
+                                        f"{API_URL}/api/purchase/finalize",
+                                        json={
+                                            "request_id": st.session_state.verified_request_id,
+                                            "approved": False,
+                                            "recipients": [],
+                                            "wallet_address": st.session_state.wallet_address
+                                        }
+                                    )
 
                             if response.status_code == 200:
-                                st.success("Purchase rejected. Your escrow has been refunded.")
+                                result = response.json()
+                                st.success("Purchase rejected.")
+
+                                # Display transaction details
+                                st.markdown(f"**Transaction Hash:** `{result.get('transaction_hash', 'N/A')}`")
+                                st.markdown(f"**Message:** {result.get('message', 'Your escrow has been refunded.')}")
+
                                 # Clear the verification result
                                 del st.session_state.verification_result
                                 del st.session_state.verified_request_id
@@ -894,10 +1045,139 @@ else:
 
         with tab1:
             st.header("Data Purchase Requests")
-            st.info("No pending requests. Requests from buyers will appear here.")
 
-            # Form for replying to purchase requests
-            with st.expander("Reply to Purchase Request"):
+            # Button to check for new requests
+            if st.button("Check for New Requests"):
+                st.success("Checking for new requests...")
+                # In a real implementation, this would query the blockchain
+                # For demo purposes, we'll just show a message
+                st.info("Found 1 new request. See details below.")
+
+                # Create a sample request for demo purposes
+                if "purchase_requests" not in st.session_state:
+                    st.session_state.purchase_requests = []
+
+                    # Add a sample request
+                    sample_request = {
+                        "request_id": "sample-request-123",
+                        "buyer": "0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce",  # Buyer address
+                        "template_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                        "amount": 0.1,
+                        "timestamp": int(time.time()),
+                        "template": {
+                            "category": "Cardiology",
+                            "demographics": {
+                                "age": True,
+                                "gender": True,
+                                "location": False,
+                                "ethnicity": False
+                            },
+                            "medical_data": {
+                                "diagnosis": True,
+                                "treatment": True,
+                                "medications": False,
+                                "lab_results": False
+                            },
+                            "time_period": "1 year",
+                            "min_records": 10
+                        }
+                    }
+                    st.session_state.purchase_requests.append(sample_request)
+
+            # Display pending requests
+            if "purchase_requests" in st.session_state and st.session_state.purchase_requests:
+                st.subheader("Pending Requests")
+
+                for i, request in enumerate(st.session_state.purchase_requests):
+                    with st.expander(f"Request #{i+1}: {request['request_id']}"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown(f"**Buyer:** {request['buyer']}")
+                            st.markdown(f"**Amount:** {request['amount']} ETH")
+                        with col2:
+                            timestamp = request.get('timestamp', int(time.time()))
+                            date_str = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                            st.markdown(f"**Timestamp:** {date_str}")
+                            st.markdown(f"**Template Hash:** {request['template_hash'][:10]}...{request['template_hash'][-6:]}")
+
+                        # Display template details if available
+                        if "template" in request:
+                            st.subheader("Requested Data Template")
+                            template = request["template"]
+
+                            st.markdown(f"**Category:** {template['category']}")
+                            st.markdown(f"**Time Period:** {template['time_period']}")
+                            st.markdown(f"**Minimum Records:** {template['min_records']}")
+
+                            # Demographics
+                            st.markdown("**Demographics:**")
+                            demographics = template["demographics"]
+                            demo_fields = []
+                            for field, included in demographics.items():
+                                if included:
+                                    demo_fields.append(field.capitalize())
+                            st.markdown(", ".join(demo_fields) if demo_fields else "None")
+
+                            # Medical data
+                            st.markdown("**Medical Data:**")
+                            medical_data = template["medical_data"]
+                            med_fields = []
+                            for field, included in medical_data.items():
+                                if included:
+                                    med_fields.append(field.capitalize())
+                            st.markdown(", ".join(med_fields) if med_fields else "None")
+
+                        # Form for replying to this request
+                        with st.form(f"reply_form_{i}"):
+                            st.markdown("**Reply to Request**")
+                            template_cid = st.text_input("Template CID", key=f"template_cid_{i}")
+                            submit_button = st.form_submit_button("Submit Reply")
+
+                            if submit_button:
+                                if not template_cid:
+                                    st.error("Please enter a Template CID")
+                                else:
+                                    # Call API to reply to purchase request
+                                    try:
+                                        response = requests.post(
+                                            f"{API_URL}/purchase/reply",
+                                            json={
+                                                "request_id": request["request_id"],
+                                                "template_cid": template_cid,
+                                                "wallet_address": st.session_state.wallet_address
+                                            }
+                                        )
+
+                                        # If the first URL fails, try the alternative URL
+                                        if response.status_code == 404:
+                                            print("Trying alternative API URL...")
+                                            response = requests.post(
+                                                f"{API_URL}/api/purchase/reply",
+                                                json={
+                                                    "request_id": request["request_id"],
+                                                    "template_cid": template_cid,
+                                                    "wallet_address": st.session_state.wallet_address
+                                                }
+                                            )
+
+                                        if response.status_code == 200:
+                                            result = response.json()
+                                            st.success("Reply submitted successfully!")
+                                            st.markdown(f"**Transaction Hash:** {result.get('transaction_hash', 'N/A')[:10]}...{result.get('transaction_hash', 'N/A')[-6:]}")
+
+                                            # Remove the request from the list
+                                            st.session_state.purchase_requests.pop(i)
+                                            st.info("Request has been processed and removed from the pending list.")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+                                    except Exception as e:
+                                        st.error(f"Error: {str(e)}")
+            else:
+                st.info("No pending requests. Requests from buyers will appear here.")
+
+            # Form for manually replying to purchase requests
+            with st.expander("Manually Reply to Purchase Request"):
                 with st.form("reply_purchase_form"):
                     request_id = st.text_input("Request ID")
                     template_cid = st.text_input("Template CID")
@@ -915,6 +1195,18 @@ else:
                                     "wallet_address": st.session_state.wallet_address
                                 }
                             )
+
+                            # If the first URL fails, try the alternative URL
+                            if response.status_code == 404:
+                                print("Trying alternative API URL...")
+                                response = requests.post(
+                                    f"{API_URL}/api/purchase/reply",
+                                    json={
+                                        "request_id": request_id,
+                                        "template_cid": template_cid,
+                                        "wallet_address": st.session_state.wallet_address
+                                    }
+                                )
 
                             if response.status_code == 200:
                                 st.success("Reply submitted successfully!")
@@ -940,14 +1232,81 @@ else:
         with tab1:
             st.header("Request Healthcare Data")
 
-            # Form for requesting data
+            # Form for requesting data with specific fields
             with st.form("request_data_form"):
-                template_hash = st.text_input("Template Hash")
-                amount = st.number_input("Escrow Amount (ETH)", min_value=0.001, step=0.001)
+                st.subheader("Data Template")
+                st.write("Select the fields you're interested in purchasing:")
+
+                # Data category selection
+                data_category = st.selectbox(
+                    "Data Category",
+                    ["Cardiology", "Oncology", "Neurology", "Pediatrics", "General"],
+                    help="The medical specialty of the data you're interested in"
+                )
+
+                # Demographics fields
+                st.write("Demographics:")
+                col1, col2 = st.columns(2)
+                with col1:
+                    include_age = st.checkbox("Age", value=True)
+                    include_gender = st.checkbox("Gender", value=True)
+                with col2:
+                    include_location = st.checkbox("Location")
+                    include_ethnicity = st.checkbox("Ethnicity")
+
+                # Medical data fields
+                st.write("Medical Data:")
+                col1, col2 = st.columns(2)
+                with col1:
+                    include_diagnosis = st.checkbox("Diagnosis", value=True)
+                    include_treatment = st.checkbox("Treatment", value=True)
+                with col2:
+                    include_medications = st.checkbox("Medications")
+                    include_lab_results = st.checkbox("Lab Results")
+
+                # Time period
+                st.write("Time Period:")
+                time_period = st.select_slider(
+                    "Data from the last:",
+                    options=["1 month", "3 months", "6 months", "1 year", "3 years", "5 years", "All time"],
+                    value="1 year"
+                )
+
+                # Minimum records
+                min_records = st.number_input("Minimum number of records", min_value=1, value=10, step=1)
+
+                # Escrow amount
+                amount = st.number_input("Escrow Amount (ETH)", min_value=0.001, value=0.1, step=0.001)
 
                 submit_button = st.form_submit_button("Submit Request")
 
                 if submit_button:
+                    # Create a template object from the selected fields
+                    template = {
+                        "category": data_category,
+                        "demographics": {
+                            "age": include_age,
+                            "gender": include_gender,
+                            "location": include_location,
+                            "ethnicity": include_ethnicity
+                        },
+                        "medical_data": {
+                            "diagnosis": include_diagnosis,
+                            "treatment": include_treatment,
+                            "medications": include_medications,
+                            "lab_results": include_lab_results
+                        },
+                        "time_period": time_period,
+                        "min_records": min_records
+                    }
+
+                    # Generate a template hash from the template object
+                    template_json = json.dumps(template, sort_keys=True)
+                    template_hash = f"0x{hashlib.sha256(template_json.encode()).hexdigest()}"
+
+                    # Display the template and hash
+                    st.info(f"Generated template hash: {template_hash[:10]}...{template_hash[-6:]}")
+
                     # Call API to request data purchase
                     try:
                         response = requests.post(
@@ -955,13 +1314,44 @@ else:
                             json={
                                 "template_hash": template_hash,
                                 "amount": amount,
-                                "wallet_address": st.session_state.wallet_address
+                                "wallet_address": st.session_state.wallet_address,
+                                "template": template  # Include the full template for reference
                             }
                         )
 
+                        # If the first URL fails, try the alternative URL
+                        if response.status_code == 404:
+                            print("Trying alternative API URL...")
+                            response = requests.post(
+                                f"{API_URL}/api/purchase/request",
+                                json={
+                                    "template_hash": template_hash,
+                                    "amount": amount,
+                                    "wallet_address": st.session_state.wallet_address,
+                                    "template": template  # Include the full template for reference
+                                }
+                            )
+
                         if response.status_code == 200:
+                            result = response.json()
                             st.success("Request submitted successfully!")
-                            st.json(response.json())
+
+                            # Display the result in a nicer format
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown(f"**Request ID:** {result['request_id']}")
+                                st.markdown(f"**Transaction Hash:** {result['transaction_hash'][:10]}...{result['transaction_hash'][-6:]}")
+                            with col2:
+                                timestamp = result.get('timestamp', int(time.time()))
+                                date_str = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                                st.markdown(f"**Timestamp:** {date_str}")
+                                st.markdown(f"**Amount:** {amount} ETH")
+
+                            # Store the request ID in session state for later use
+                            st.session_state.current_request_id = result['request_id']
+
+                            # Provide instructions for the next steps
+                            st.info("Your request has been submitted. The hospital will review your request and respond with a template package if data matching your criteria is available.")
                         else:
                             st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
                     except Exception as e:
@@ -969,7 +1359,266 @@ else:
 
         with tab2:
             st.header("My Purchase Requests")
-            st.info("No purchases. Your purchase requests will appear here.")
+
+            # Fetch transaction history from the API
+            try:
+                # Show a loading spinner while fetching transactions
+                with st.spinner("Fetching transaction history..."):
+                    response = requests.get(
+                        f"{API_URL}/transactions",
+                        params={"wallet_address": st.session_state.wallet_address}
+                    )
+
+                    # If the first URL fails, try the alternative URL
+                    if response.status_code == 404:
+                        print("Trying alternative API URL...")
+                        response = requests.get(
+                            f"{API_URL}/api/transactions",
+                            params={"wallet_address": st.session_state.wallet_address}
+                        )
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        st.session_state.transaction_history = result.get("transactions", [])
+                    else:
+                        st.error(f"Error fetching transactions: {response.json().get('detail', 'Unknown error')}")
+                        # Use sample data as fallback
+                        if "transaction_history" not in st.session_state:
+                            st.session_state.transaction_history = []
+            except Exception as e:
+                st.error(f"Error connecting to API: {str(e)}")
+                # Use sample data as fallback
+                if "transaction_history" not in st.session_state:
+                    st.session_state.transaction_history = []
+
+            # If we have no transactions yet, add some sample transactions for demo purposes
+            if not st.session_state.transaction_history:
+                # Add some sample transactions for demo purposes
+                sample_transactions = [
+                    {
+                        "id": "tx-001",
+                        "request_id": "req-123456",
+                        "type": "Request",
+                        "status": "Completed",
+                        "timestamp": int(time.time()) - 86400,  # 1 day ago
+                        "tx_hash": "0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6",
+                        "gas_fee": 0.0012,
+                        "amount": 0.1,
+                        "template_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                        "details": {
+                            "category": "Cardiology",
+                            "fields": ["Age", "Gender", "Diagnosis", "Treatment"],
+                            "time_period": "1 year",
+                            "min_records": 10
+                        }
+                    },
+                    {
+                        "id": "tx-002",
+                        "request_id": "req-123456",
+                        "type": "Hospital Reply",
+                        "status": "Completed",
+                        "timestamp": int(time.time()) - 43200,  # 12 hours ago
+                        "tx_hash": "0x8bc1D0aA17fAA544AE2Ca48106b92836A9eeF9a7",
+                        "template_cid": "QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5o",
+                        "hospital": "0x28B317594b44483D24EE8AdCb13A1b148497C6ba",
+                        "details": {
+                            "records_count": 15,
+                            "patients_count": 3
+                        }
+                    },
+                    {
+                        "id": "tx-003",
+                        "request_id": "req-123456",
+                        "type": "Verification",
+                        "status": "Completed",
+                        "timestamp": int(time.time()) - 21600,  # 6 hours ago
+                        "details": {
+                            "verified": True,
+                            "merkle_proofs": "Valid",
+                            "signatures": "Valid",
+                            "recipients": [
+                                "0x28B317594b44483D24EE8AdCb13A1b148497C6ba",  # Hospital
+                                "0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A",  # Patient 1
+                                "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"   # Patient 2
+                            ]
+                        }
+                    },
+                    {
+                        "id": "tx-004",
+                        "request_id": "req-123456",
+                        "type": "Finalize",
+                        "status": "Completed",
+                        "timestamp": int(time.time()) - 10800,  # 3 hours ago
+                        "tx_hash": "0x9cd1E0aA17fAA544AE2Ca48106b92836A9eeF9a8",
+                        "gas_fee": 0.0018,
+                        "amount": 0.1,
+                        "approved": True,
+                        "details": {
+                            "recipients": [
+                                "0x28B317594b44483D24EE8AdCb13A1b148497C6ba",  # Hospital
+                                "0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A",  # Patient 1
+                                "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"   # Patient 2
+                            ],
+                            "payment_per_recipient": 0.0333
+                        }
+                    }
+                ]
+
+                # Add sample transactions to history
+                st.session_state.transaction_history.extend(sample_transactions)
+
+            # Add a refresh button
+            if st.button("Refresh Transaction History"):
+                st.session_state.pop("transaction_history", None)
+                st.rerun()
+
+            # Display transaction history in a table
+            if st.session_state.transaction_history:
+                # Create tabs for different views
+                history_tab1, history_tab2 = st.tabs(["Transaction History", "Workflow Visualization"])
+
+                with history_tab1:
+                    # Group transactions by request ID
+                    request_ids = set(tx["request_id"] for tx in st.session_state.transaction_history)
+
+                    for request_id in request_ids:
+                        with st.expander(f"Request: {request_id}", expanded=True):
+                            # Filter transactions for this request ID
+                            request_txs = [tx for tx in st.session_state.transaction_history if tx["request_id"] == request_id]
+
+                            # Sort by timestamp (newest first)
+                            request_txs.sort(key=lambda x: x["timestamp"], reverse=True)
+
+                            # Create a DataFrame for display
+                            tx_data = []
+                            for tx in request_txs:
+                                tx_time = datetime.datetime.fromtimestamp(tx["timestamp"]).strftime('%Y-%m-%d %H:%M:%S')
+                                tx_hash = tx.get("tx_hash", "N/A")
+                                tx_hash_short = f"{tx_hash[:8]}...{tx_hash[-6:]}" if tx_hash != "N/A" else "N/A"
+
+                                tx_data.append({
+                                    "Type": tx["type"],
+                                    "Status": tx["status"],
+                                    "Timestamp": tx_time,
+                                    "TX Hash": tx_hash_short,
+                                    "Gas Fee (ETH)": tx.get("gas_fee", "N/A"),
+                                    "Amount (ETH)": tx.get("amount", "N/A")
+                                })
+
+                            # Display as a table
+                            st.table(tx_data)
+
+                            # Show the latest transaction details
+                            latest_tx = request_txs[0]
+                            st.subheader("Latest Transaction Details")
+
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown(f"**Transaction Type:** {latest_tx['type']}")
+                                st.markdown(f"**Status:** {latest_tx['status']}")
+                                if "tx_hash" in latest_tx:
+                                    st.markdown(f"**Transaction Hash:** `{latest_tx['tx_hash']}`")
+                            with col2:
+                                tx_time = datetime.datetime.fromtimestamp(latest_tx["timestamp"]).strftime('%Y-%m-%d %H:%M:%S')
+                                st.markdown(f"**Timestamp:** {tx_time}")
+                                if "gas_fee" in latest_tx:
+                                    st.markdown(f"**Gas Fee:** {latest_tx['gas_fee']} ETH")
+                                if "amount" in latest_tx:
+                                    st.markdown(f"**Amount:** {latest_tx['amount']} ETH")
+
+                            # Show specific details based on transaction type
+                            if latest_tx["type"] == "Request":
+                                st.markdown("**Template Details:**")
+                                st.json(latest_tx["details"])
+                            elif latest_tx["type"] == "Hospital Reply":
+                                st.markdown("**Reply Details:**")
+                                st.markdown(f"**Template CID:** `{latest_tx.get('template_cid', 'N/A')}`")
+                                st.markdown(f"**Hospital:** `{latest_tx.get('hospital', 'N/A')}`")
+                                st.markdown(f"**Records Count:** {latest_tx['details'].get('records_count', 'N/A')}")
+                                st.markdown(f"**Patients Count:** {latest_tx['details'].get('patients_count', 'N/A')}")
+                            elif latest_tx["type"] == "Verification":
+                                st.markdown("**Verification Details:**")
+                                st.markdown(f"**Verified:** {latest_tx['details'].get('verified', False)}")
+                                st.markdown(f"**Merkle Proofs:** {latest_tx['details'].get('merkle_proofs', 'N/A')}")
+                                st.markdown(f"**Signatures:** {latest_tx['details'].get('signatures', 'N/A')}")
+
+                                st.markdown("**Recipients:**")
+                                for i, recipient in enumerate(latest_tx['details'].get('recipients', [])):
+                                    # Check if it's a known address
+                                    recipient_name = "Unknown"
+                                    for name, info in TEST_ACCOUNTS.items():
+                                        if info["address"].lower() == recipient.lower():
+                                            recipient_name = f"{name} ({info['role']})"
+                                            break
+                                    st.markdown(f"**{i+1}.** `{recipient}` - {recipient_name}")
+                            elif latest_tx["type"] == "Finalize":
+                                st.markdown("**Finalization Details:**")
+                                st.markdown(f"**Approved:** {latest_tx['approved']}")
+                                if latest_tx['approved']:
+                                    st.markdown(f"**Payment per Recipient:** {latest_tx['details'].get('payment_per_recipient', 'N/A')} ETH")
+                                    st.markdown("**Recipients:**")
+                                    for i, recipient in enumerate(latest_tx['details'].get('recipients', [])):
+                                        # Check if it's a known address
+                                        recipient_name = "Unknown"
+                                        for name, info in TEST_ACCOUNTS.items():
+                                            if info["address"].lower() == recipient.lower():
+                                                recipient_name = f"{name} ({info['role']})"
+                                                break
+                                        st.markdown(f"**{i+1}.** `{recipient}` - {recipient_name}")
+
+                with history_tab2:
+                    st.subheader("Purchase Workflow Visualization")
+
+                    # Create a visual representation of the workflow
+                    for request_id in request_ids:
+                        with st.expander(f"Request: {request_id}", expanded=True):
+                            # Filter transactions for this request ID
+                            request_txs = [tx for tx in st.session_state.transaction_history if tx["request_id"] == request_id]
+
+                            # Sort by timestamp
+                            request_txs.sort(key=lambda x: x["timestamp"])
+
+                            # Define workflow steps
+                            workflow_steps = [
+                                "Request",
+                                "Hospital Reply",
+                                "Verification",
+                                "Finalize"
+                            ]
+
+                            # Create a progress bar for the workflow
+                            step_statuses = {}
+                            for tx in request_txs:
+                                step_statuses[tx["type"]] = tx["status"]
+
+                            # Display the workflow progress
+                            st.write("Workflow Progress:")
+                            cols = st.columns(len(workflow_steps))
+
+                            for i, step in enumerate(workflow_steps):
+                                with cols[i]:
+                                    if step in step_statuses:
+                                        if step_statuses[step] == "Completed":
+                                            st.markdown(f"**{step}** ✅")
+                                        elif step_statuses[step] == "Pending":
+                                            st.markdown(f"**{step}** ⏳")
+                                        else:
+                                            st.markdown(f"**{step}** ❌")
+                                    else:
+                                        st.markdown(f"**{step}** ⬜")
+
+                            # Display a timeline
+                            st.write("Timeline:")
+                            for tx in request_txs:
+                                tx_time = datetime.datetime.fromtimestamp(tx["timestamp"]).strftime('%Y-%m-%d %H:%M:%S')
+                                if tx["status"] == "Completed":
+                                    st.success(f"**{tx_time}**: {tx['type']} - {tx['status']}")
+                                elif tx["status"] == "Pending":
+                                    st.info(f"**{tx_time}**: {tx['type']} - {tx['status']}")
+                                else:
+                                    st.error(f"**{tx_time}**: {tx['type']} - {tx['status']}")
+            else:
+                st.info("No purchases. Your purchase requests will appear here.")
 
             # Form for finalizing purchases
             with st.expander("Finalize Purchase"):
@@ -993,8 +1642,45 @@ else:
                                 }
                             )
 
+                            # If the first URL fails, try the alternative URL
+                            if response.status_code == 404:
+                                print("Trying alternative API URL...")
+                                response = requests.post(
+                                    f"{API_URL}/api/purchase/finalize",
+                                    json={
+                                        "request_id": request_id,
+                                        "approved": approved,
+                                        "recipients": recipients.split(","),
+                                        "wallet_address": st.session_state.wallet_address
+                                    }
+                                )
+
                             if response.status_code == 200:
+                                result = response.json()
                                 st.success("Purchase finalized successfully!")
+
+                                # Add transaction from the result if available
+                                if "transaction" in result:
+                                    st.session_state.transaction_history.append(result["transaction"])
+                                else:
+                                    # Fallback to creating our own transaction
+                                    new_tx = {
+                                        "id": f"tx-{len(st.session_state.transaction_history) + 1:03d}",
+                                        "request_id": request_id,
+                                        "type": "Finalize",
+                                        "status": "Completed",
+                                        "timestamp": int(time.time()),
+                                        "tx_hash": result.get('transaction_hash', f"0x{hashlib.sha256(f'finalize_{request_id}_{int(time.time())}').hexdigest()[:40]}"),
+                                        "gas_fee": result.get('gas_fee', 0.0018),
+                                        "amount": 0.1,
+                                        "approved": approved,
+                                        "details": {
+                                            "recipients": recipients.split(","),
+                                            "payment_per_recipient": 0.1 / len(recipients.split(",")) if approved and recipients else 0
+                                        }
+                                    }
+                                    st.session_state.transaction_history.append(new_tx)
+                                st.rerun()
                             else:
                                 st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
                         except Exception as e:

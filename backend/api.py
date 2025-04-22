@@ -3,6 +3,7 @@ import os
 import time
 import hashlib
 import base64
+import random
 from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Depends, Body, Response
 from pydantic import BaseModel
@@ -316,6 +317,7 @@ class ShareRequest(BaseModel):
 class PurchaseRequest(BaseModel):
     template_hash: str
     amount: float
+    template: Optional[dict] = None
 
 # API Endpoints
 @app.post("/api/records/sign")
@@ -804,6 +806,7 @@ async def share_record(record_cid: str = Body(None), doctor_address: str = Body(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/purchase/request")
+@app.post("/purchase/request")
 async def request_purchase(purchase_req: PurchaseRequest, wallet_address: str = Body(...)):
     """
     Buyer requests to purchase data (on-chain)
@@ -822,14 +825,84 @@ async def request_purchase(purchase_req: PurchaseRequest, wallet_address: str = 
         # })
         # receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
 
+        # For demo purposes, generate a unique request ID
+        import uuid
+        request_id = str(uuid.uuid4())
+
+        # Generate a transaction hash for demo purposes
+        tx_hash = f"0x{hashlib.sha256(request_id.encode()).hexdigest()}"
+
+        # Calculate a simulated gas fee
+        gas_fee = round(random.uniform(0.001, 0.003), 4)
+
+        # Store the request in a local file for demo purposes
+        # In a real implementation, this would be stored on the blockchain
+        purchase_data = {
+            "request_id": request_id,
+            "template_hash": purchase_req.template_hash,
+            "amount": purchase_req.amount,
+            "buyer": wallet_address,
+            "timestamp": int(time.time()),
+            "status": "pending",
+            "tx_hash": tx_hash,
+            "gas_fee": gas_fee
+        }
+
+        # If a template was provided, store it as well
+        if purchase_req.template:
+            purchase_data["template"] = purchase_req.template
+            print(f"Template provided: {purchase_req.template}")
+
+            # Extract fields for transaction history
+            fields = []
+            if purchase_req.template.get("demographics"):
+                for field, included in purchase_req.template["demographics"].items():
+                    if included:
+                        fields.append(field.capitalize())
+            if purchase_req.template.get("medical_data"):
+                for field, included in purchase_req.template["medical_data"].items():
+                    if included:
+                        fields.append(field.capitalize())
+
+            # Create transaction history entry
+            purchase_data["transaction"] = {
+                "id": f"tx-{int(time.time())}",
+                "request_id": request_id,
+                "type": "Request",
+                "status": "Completed",
+                "timestamp": int(time.time()),
+                "tx_hash": tx_hash,
+                "gas_fee": gas_fee,
+                "amount": purchase_req.amount,
+                "template_hash": purchase_req.template_hash,
+                "details": {
+                    "category": purchase_req.template.get("category", "General"),
+                    "fields": fields,
+                    "time_period": purchase_req.template.get("time_period", "1 year"),
+                    "min_records": purchase_req.template.get("min_records", 10)
+                }
+            }
+
+        # Save to local storage for demo purposes
+        os.makedirs("local_storage/purchases", exist_ok=True)
+        with open(f"local_storage/purchases/{request_id}.json", "w") as f:
+            json.dump(purchase_data, f)
+
+        print(f"Created purchase request with ID: {request_id}")
+
         return {
-            "request_id": "placeholder_request_id",
-            "transaction_hash": "placeholder_tx_hash"
+            "request_id": request_id,
+            "transaction_hash": tx_hash,
+            "timestamp": purchase_data["timestamp"],
+            "gas_fee": gas_fee,
+            "transaction": purchase_data.get("transaction")
         }
     except Exception as e:
+        print(f"Error in request_purchase: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/purchase/reply")
+@app.post("/purchase/reply")
 async def reply_to_purchase(
     request_id: str = Body(...),
     template_cid: str = Body(...),
@@ -839,11 +912,58 @@ async def reply_to_purchase(
     Hospital replies to a purchase request
     """
     try:
+        # Clean the template CID
+        clean_template_cid = clean_cid(template_cid)
+        print(f"Using cleaned template CID: {clean_template_cid}")
+
         # Check if the wallet address matches the Hospital address
         if wallet_address == HOSPITAL_ADDRESS:
-            print(f"Hospital {wallet_address} is replying to purchase request {request_id} with template {template_cid}")
+            print(f"Hospital {wallet_address} is replying to purchase request {request_id} with template {clean_template_cid}")
         else:
             print(f"Warning: Non-hospital address {wallet_address} is attempting to reply to a purchase request")
+
+        # Check if the request exists
+        request_file = f"local_storage/purchases/{request_id}.json"
+        if not os.path.exists(request_file):
+            raise HTTPException(status_code=404, detail=f"Purchase request {request_id} not found")
+
+        # Load the request data
+        with open(request_file, "r") as f:
+            purchase_data = json.load(f)
+
+        # Generate a transaction hash for demo purposes
+        tx_hash = f"0x{hashlib.sha256(f'{request_id}_{clean_template_cid}_{int(time.time())}'.encode()).hexdigest()}"
+
+        # Calculate a simulated gas fee
+        gas_fee = round(random.uniform(0.001, 0.003), 4)
+
+        # Create transaction history entry
+        transaction = {
+            "id": f"tx-{int(time.time())}",
+            "request_id": request_id,
+            "type": "Hospital Reply",
+            "status": "Completed",
+            "timestamp": int(time.time()),
+            "tx_hash": tx_hash,
+            "gas_fee": gas_fee,
+            "template_cid": clean_template_cid,
+            "hospital": wallet_address,
+            "details": {
+                "records_count": random.randint(10, 30),  # Simulated count for demo
+                "patients_count": random.randint(2, 5)    # Simulated count for demo
+            }
+        }
+
+        # Update the request with the template CID and transaction
+        purchase_data["template_cid"] = clean_template_cid
+        purchase_data["status"] = "replied"
+        purchase_data["replied_at"] = int(time.time())
+        purchase_data["hospital"] = wallet_address
+        purchase_data["reply_transaction"] = transaction
+
+        # Save the updated request data
+        with open(request_file, "w") as f:
+            json.dump(purchase_data, f)
 
         # This would call the smart contract in production
         # tx_hash = contract.functions.reply(request_id, template_cid).transact({'from': wallet_address})
@@ -851,12 +971,20 @@ async def reply_to_purchase(
 
         return {
             "status": "success",
-            "transaction_hash": "placeholder_tx_hash"
+            "transaction_hash": tx_hash,
+            "request_id": request_id,
+            "template_cid": clean_template_cid,
+            "gas_fee": gas_fee,
+            "transaction": transaction
         }
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Error in reply_to_purchase: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/purchase/finalize")
+@app.post("/purchase/finalize")
 async def finalize_purchase(
     request_id: str = Body(...),
     approved: bool = Body(...),
@@ -873,15 +1001,79 @@ async def finalize_purchase(
         else:
             print(f"Warning: Non-buyer address {wallet_address} is attempting to finalize a purchase request")
 
+        # Check if the request exists
+        request_file = f"local_storage/purchases/{request_id}.json"
+        if not os.path.exists(request_file):
+            raise HTTPException(status_code=404, detail=f"Purchase request {request_id} not found")
+
+        # Load the request data
+        with open(request_file, "r") as f:
+            purchase_data = json.load(f)
+
+        # Check if the request has been replied to
+        if purchase_data.get("status") != "replied":
+            raise HTTPException(status_code=400, detail=f"Purchase request {request_id} has not been replied to yet")
+
+        # Generate a transaction hash for demo purposes
+        tx_hash = f"0x{hashlib.sha256(f'{request_id}_{approved}_{int(time.time())}'.encode()).hexdigest()}"
+
+        # Calculate a simulated gas fee
+        gas_fee = round(random.uniform(0.002, 0.004), 4)  # Finalization costs more gas
+
+        # Get the amount from the purchase data
+        amount = purchase_data.get("amount", 0.1)  # Default to 0.1 ETH if not found
+
+        # Calculate payment per recipient if approved
+        payment_per_recipient = 0
+        if approved and recipients:
+            payment_per_recipient = amount / len(recipients)
+
+        # Create transaction history entry for finalization
+        finalize_transaction = {
+            "id": f"tx-{int(time.time())}",
+            "request_id": request_id,
+            "type": "Finalize",
+            "status": "Completed",
+            "timestamp": int(time.time()),
+            "tx_hash": tx_hash,
+            "gas_fee": gas_fee,
+            "amount": amount,
+            "approved": approved,
+            "details": {
+                "recipients": recipients,
+                "payment_per_recipient": round(payment_per_recipient, 4) if approved else 0
+            }
+        }
+
+        # Update the request status
+        purchase_data["status"] = "finalized" if approved else "rejected"
+        purchase_data["finalized_at"] = int(time.time())
+        purchase_data["approved"] = approved
+        purchase_data["recipients"] = recipients
+        purchase_data["finalize_transaction"] = finalize_transaction
+
+        # Save the updated request data
+        with open(request_file, "w") as f:
+            json.dump(purchase_data, f)
+
         # This would call the smart contract in production
         # tx_hash = contract.functions.finalize(request_id, approved, recipients).transact({'from': wallet_address})
         # receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
 
         return {
             "status": "success",
-            "transaction_hash": "placeholder_tx_hash"
+            "transaction_hash": tx_hash,
+            "request_id": request_id,
+            "approved": approved,
+            "recipients": recipients,
+            "gas_fee": gas_fee,
+            "message": "Payment has been distributed" if approved else "Escrow has been refunded",
+            "transaction": finalize_transaction
         }
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Error in finalize_purchase: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/access_shared")
@@ -1157,11 +1349,16 @@ async def access_shared_record(metadata_cid: str = Body(...), wallet_address: st
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/purchase/verify")
+@app.post("/purchase/verify")
 async def verify_purchase(request_id: str = Body(...), template_cid: str = Body(...), wallet_address: str = Body(...)):
     """
     Verify a purchase off-chain
     """
     try:
+        # Clean the template CID
+        clean_template_cid = clean_cid(template_cid)
+        print(f"Using cleaned template CID: {clean_template_cid}")
+
         # In a real implementation, this would:
         # 1. Retrieve the combined template package from IPFS
         # 2. Verify the hospital's signature
@@ -1174,28 +1371,110 @@ async def verify_purchase(request_id: str = Body(...), template_cid: str = Body(
 
         # Check if the wallet address matches the Buyer address
         if wallet_address == BUYER_ADDRESS:
-            print(f"Buyer {wallet_address} is verifying purchase {request_id} with template CID {template_cid}")
+            print(f"Buyer {wallet_address} is verifying purchase {request_id} with template CID {clean_template_cid}")
         else:
             print(f"Warning: Non-buyer address {wallet_address} is attempting to verify a purchase")
 
-        # For demo purposes, we'll simulate this process
+        # Check if the request exists
+        request_file = f"local_storage/purchases/{request_id}.json"
+        if not os.path.exists(request_file):
+            raise HTTPException(status_code=404, detail=f"Purchase request {request_id} not found")
 
-        # Simulate verification result
-        verification_passed = True
+        # Load the request data
+        with open(request_file, "r") as f:
+            purchase_data = json.load(f)
+
+        # Try to retrieve the template from IPFS to verify it exists
+        template_exists = False
+        template_data = None
+
+        try:
+            if check_ipfs_connection():
+                try:
+                    # Try to retrieve from IPFS
+                    template_data = ipfs_client.cat(clean_template_cid)
+                    print(f"Retrieved template data from IPFS: {len(template_data)} bytes")
+                    template_exists = True
+                except Exception as ipfs_error:
+                    print(f"Error retrieving template from IPFS: {str(ipfs_error)}")
+                    # Try local storage as fallback
+                    try:
+                        with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                            template_data = f.read()
+                        print(f"Retrieved template data from local storage: {len(template_data)} bytes")
+                        template_exists = True
+                    except FileNotFoundError:
+                        print(f"Template not found in IPFS or local storage: {clean_template_cid}")
+            else:
+                # IPFS not connected, try local storage
+                try:
+                    with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                        template_data = f.read()
+                    print(f"Retrieved template data from local storage: {len(template_data)} bytes")
+                    template_exists = True
+                except FileNotFoundError:
+                    print(f"Template not found in local storage and IPFS is not available")
+        except Exception as e:
+            print(f"Error checking template existence: {str(e)}")
+
+        # For demo purposes, we'll simulate the verification process
+        # In a real implementation, we would verify the template data
+        verification_passed = template_exists
+
+        if not verification_passed:
+            print(f"Verification failed: Template does not exist or could not be retrieved")
+            return {
+                "status": "error",
+                "verified": False,
+                "message": "Template does not exist or could not be retrieved"
+            }
 
         # Simulate list of recipients (hospital + patients)
+        # In a real implementation, these would be extracted from the template data
         recipients = [
-            "0x1234567890123456789012345678901234567890",  # Hospital
-            "0x2345678901234567890123456789012345678901",  # Patient 1
-            "0x3456789012345678901234567890123456789012"   # Patient 2
+            HOSPITAL_ADDRESS,  # Hospital
+            PATIENT_ADDRESS,   # Patient 1
+            "0x3456789012345678901234567890123456789012"   # Patient 2 (example)
         ]
+
+        # Create transaction history entry for verification
+        verification_transaction = {
+            "id": f"tx-{int(time.time())}",
+            "request_id": request_id,
+            "type": "Verification",
+            "status": "Completed",
+            "timestamp": int(time.time()),
+            "details": {
+                "verified": verification_passed,
+                "merkle_proofs": "Valid",
+                "signatures": "Valid",
+                "recipients": recipients,
+                "template_size": len(template_data) if template_data else 0
+            }
+        }
+
+        # Update the request data with verification information
+        purchase_data["verification"] = {
+            "timestamp": int(time.time()),
+            "verified": verification_passed,
+            "verifier": wallet_address,
+            "recipients": recipients
+        }
+        purchase_data["verification_transaction"] = verification_transaction
+
+        # Save the updated request data
+        with open(request_file, "w") as f:
+            json.dump(purchase_data, f)
 
         return {
             "status": "success",
             "verified": verification_passed,
-            "recipients": recipients
+            "recipients": recipients,
+            "template_size": len(template_data) if template_data else 0,
+            "transaction": verification_transaction
         }
     except Exception as e:
+        print(f"Error in verify_purchase: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/opening/compute_partial")
@@ -1357,6 +1636,77 @@ async def view_ipfs_content(cid: str, format: str = "raw"):
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/transactions")
+@app.get("/transactions")
+async def get_transactions(wallet_address: str):
+    """
+    Get transaction history for a specific wallet address
+    """
+    try:
+        # Check if the local storage directory exists
+        if not os.path.exists("local_storage/purchases"):
+            return {"transactions": []}
+
+        # Get all purchase files
+        purchase_files = os.listdir("local_storage/purchases")
+
+        # Initialize transaction list
+        transactions = []
+
+        # Process each purchase file
+        for file_name in purchase_files:
+            if not file_name.endswith(".json"):
+                continue
+
+            file_path = f"local_storage/purchases/{file_name}"
+
+            try:
+                with open(file_path, "r") as f:
+                    purchase_data = json.load(f)
+
+                # Check if this purchase is related to the wallet address
+                is_related = False
+                if purchase_data.get("buyer") == wallet_address:
+                    is_related = True
+                elif purchase_data.get("hospital") == wallet_address:
+                    is_related = True
+                elif wallet_address in purchase_data.get("recipients", []):
+                    is_related = True
+
+                if is_related:
+                    # Collect all transactions for this purchase
+                    purchase_transactions = []
+
+                    # Initial request transaction
+                    if "transaction" in purchase_data:
+                        purchase_transactions.append(purchase_data["transaction"])
+
+                    # Reply transaction
+                    if "reply_transaction" in purchase_data:
+                        purchase_transactions.append(purchase_data["reply_transaction"])
+
+                    # Verification transaction
+                    if "verification_transaction" in purchase_data:
+                        purchase_transactions.append(purchase_data["verification_transaction"])
+
+                    # Finalize transaction
+                    if "finalize_transaction" in purchase_data:
+                        purchase_transactions.append(purchase_data["finalize_transaction"])
+
+                    # Add all transactions to the list
+                    transactions.extend(purchase_transactions)
+            except Exception as e:
+                print(f"Error processing file {file_name}: {str(e)}")
+                continue
+
+        # Sort transactions by timestamp (newest first)
+        transactions.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+
+        return {"transactions": transactions}
+    except Exception as e:
+        print(f"Error in get_transactions: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
