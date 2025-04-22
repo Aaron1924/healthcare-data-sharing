@@ -336,7 +336,7 @@ else:
         fetch_patient_records()
 
         # Tabs for different actions
-        tab1, tab2, tab3 = st.tabs(["My Records", "Share Records", "Data Requests"])
+        tab1, tab2, tab3, tab4 = st.tabs(["My Records", "Share Records", "Data Requests", "Data Purchase Requests"])
 
         with tab1:
             st.header("My Health Records")
@@ -429,12 +429,19 @@ else:
                 sorted_records = sorted(st.session_state.records, key=lambda x: x.get('timestamp', 0), reverse=True)
 
                 for i, record in enumerate(sorted_records):
-                    with st.expander(f"{record.get('diagnosis', 'Medical Record')} - {record.get('date', 'Unknown date')}"):
-                        col1, col2 = st.columns(2)
+                    # Get diagnosis from medical_data if available
+                    diagnosis = "Medical Record"
+                    if record.get('medical_data', {}) and record['medical_data'].get('diagnosis'):
+                        diagnosis = record['medical_data']['diagnosis']
+                    elif record.get('diagnosis'):  # Fallback to old format
+                        diagnosis = record['diagnosis']
 
+                    with st.expander(f"{record.get('category', 'General')} - {diagnosis} - {record.get('date', 'Unknown date')}"):
+                        # Basic information
+                        col1, col2 = st.columns(2)
                         with col1:
                             st.markdown(f"**Date:** {record.get('date', 'N/A')}")
-                            st.markdown(f"**Diagnosis:** {record.get('diagnosis', 'N/A')}")
+                            st.markdown(f"**Category:** {record.get('category', 'General')}")
                             doctor_id = record.get('doctorId', 'N/A')
                             if isinstance(doctor_id, str) and len(doctor_id) > 10:
                                 st.markdown(f"**Doctor ID:** {doctor_id[:6]}...{doctor_id[-4:]}")
@@ -446,9 +453,41 @@ else:
                             date_str = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
                             st.markdown(f"**Created:** {date_str}")
                             st.markdown(f"**IPFS CID:** {record.get('cid', 'N/A')}")
-                            st.markdown(f"**Verified:** ✅")
+                            st.markdown(f"**Hospital:** {record.get('hospitalInfo', 'N/A')}")
 
-                        st.markdown("**Notes:**")
+                        # Demographics section
+                        st.subheader("Demographics")
+                        demographics = record.get('demographics', {})
+                        if demographics:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown(f"**Age:** {demographics.get('age', 'N/A')}")
+                                st.markdown(f"**Gender:** {demographics.get('gender', 'N/A')}")
+                            with col2:
+                                st.markdown(f"**Location:** {demographics.get('location', 'N/A')}")
+                                st.markdown(f"**Ethnicity:** {demographics.get('ethnicity', 'N/A')}")
+                        else:
+                            st.info("No demographics information available")
+
+                        # Medical data section
+                        st.subheader("Medical Data")
+                        medical_data = record.get('medical_data', {})
+                        if medical_data:
+                            st.markdown(f"**Diagnosis:** {medical_data.get('diagnosis', 'N/A')}")
+                            st.markdown(f"**Treatment:** {medical_data.get('treatment', 'N/A')}")
+
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown("**Medications:**")
+                                st.text_area(f"Medications_{i}", value=medical_data.get('medications', ''), height=100, disabled=True)
+                            with col2:
+                                st.markdown("**Lab Results:**")
+                                st.text_area(f"Lab_Results_{i}", value=medical_data.get('lab_results', ''), height=100, disabled=True)
+                        else:
+                            st.info("No detailed medical data available")
+
+                        # Notes section
+                        st.subheader("Additional Notes")
                         st.text_area(f"notes_{i}", value=record.get('notes', ''), height=100, disabled=True)
 
                         # Option to share with a doctor
@@ -517,6 +556,317 @@ else:
                         st.error(f"Error: {str(e)}")
 
         with tab3:
+            st.header("Data Requests")
+
+            # Function to fetch data requests for this patient
+            def fetch_data_requests():
+                try:
+                    # Call API to get data requests for this patient
+                    response = requests.get(
+                        f"{API_URL}/patient/requests",
+                        params={
+                            "wallet_address": st.session_state.wallet_address
+                        }
+                    )
+
+                    # If the first URL fails, try the alternative URL
+                    if response.status_code == 404:
+                        print("Trying alternative API URL...")
+                        response = requests.get(
+                            f"{API_URL}/api/patient/requests",
+                            params={
+                                "wallet_address": st.session_state.wallet_address
+                            }
+                        )
+
+                    if response.status_code == 200:
+                        requests_data = response.json()
+                        return requests_data.get("requests", [])
+                    else:
+                        print(f"Error fetching data requests: {response.status_code}")
+                        return []
+                except Exception as e:
+                    print(f"Error fetching data requests: {str(e)}")
+                    return []
+
+            # For demo purposes, let's create some sample data requests
+            # In a real implementation, these would come from the API
+            if "data_requests" not in st.session_state:
+                # Try to fetch from API first
+                api_requests = fetch_data_requests()
+
+                if api_requests:
+                    st.session_state.data_requests = api_requests
+                else:
+                    # Use sample data as fallback
+                    st.session_state.data_requests = [
+                        {
+                            "request_id": "req_001",
+                            "buyer": "0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce",  # Buyer address
+                            "hospital": "0x28B317594b44483D24EE8AdCb13A1b148497C6ba",  # Hospital address
+                            "template": {
+                                "category": "Cardiology",
+                                "demographics": {"age": True, "gender": True},
+                                "medical_data": {"diagnosis": True, "treatment": True},
+                                "time_period": "1 year",
+                                "min_records": 1
+                            },
+                            "status": "pending",
+                            "timestamp": int(time.time()) - 3600,  # 1 hour ago
+                            "amount": 0.1
+                        }
+                    ]
+
+            # Add a refresh button
+            if st.button("Refresh Data Requests"):
+                api_requests = fetch_data_requests()
+                if api_requests:
+                    st.session_state.data_requests = api_requests
+                st.success("Data requests refreshed!")
+
+            # Display data requests
+            if not st.session_state.data_requests:
+                st.info("No data requests found. Hospitals will send requests here when buyers request data that matches your records.")
+            else:
+                st.subheader("Pending Data Requests")
+
+                for i, request in enumerate(st.session_state.data_requests):
+                    if request.get("status") == "pending":
+                        with st.expander(f"Request {request['request_id']} - {request['template']['category']}"):
+                            # Request details
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown(f"**Request ID:** {request['request_id']}")
+
+                                # Format buyer address
+                                buyer = request.get("buyer", "Unknown")
+                                buyer_display = buyer
+                                if len(buyer) > 10:
+                                    buyer_display = f"{buyer[:6]}...{buyer[-4:]}"
+
+                                # Check if it's a known address
+                                buyer_name = "Unknown"
+                                for name, info in TEST_ACCOUNTS.items():
+                                    if info["address"].lower() == buyer.lower():
+                                        buyer_name = f"{name} ({info['role']})"
+                                        break
+
+                                st.markdown(f"**Buyer:** `{buyer_display}` - {buyer_name}")
+
+                                # Format hospital address
+                                hospital = request.get("hospital", "Unknown")
+                                hospital_display = hospital
+                                if len(hospital) > 10:
+                                    hospital_display = f"{hospital[:6]}...{hospital[-4:]}"
+
+                                # Check if it's a known address
+                                hospital_name = "Unknown"
+                                for name, info in TEST_ACCOUNTS.items():
+                                    if info["address"].lower() == hospital.lower():
+                                        hospital_name = f"{name} ({info['role']})"
+                                        break
+
+                                st.markdown(f"**Hospital:** `{hospital_display}` - {hospital_name}")
+
+                            with col2:
+                                # Format timestamp
+                                timestamp = request.get("timestamp", 0)
+                                date_str = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                                st.markdown(f"**Requested:** {date_str}")
+
+                                # Payment amount
+                                amount = request.get("amount", 0.1)
+                                st.markdown(f"**Payment Amount:** {amount} ETH")
+
+                                # Status
+                                status = request.get("status", "pending")
+                                st.markdown(f"**Status:** {status.capitalize()}")
+
+                            # Template details
+                            st.subheader("Requested Data")
+                            template = request.get("template", {})
+
+                            # Category
+                            st.markdown(f"**Category:** {template.get('category', 'General')}")
+
+                            # Demographics
+                            demographics = template.get("demographics", {})
+                            if demographics:
+                                st.markdown("**Demographics:**")
+                                demo_items = []
+                                for field, included in demographics.items():
+                                    if included:
+                                        demo_items.append(field.capitalize())
+                                st.markdown(", ".join(demo_items))
+
+                            # Medical data
+                            medical_data = template.get("medical_data", {})
+                            if medical_data:
+                                st.markdown("**Medical Data:**")
+                                med_items = []
+                                for field, included in medical_data.items():
+                                    if included:
+                                        med_items.append(field.capitalize())
+                                st.markdown(", ".join(med_items))
+
+                            # Time period and min records
+                            st.markdown(f"**Time Period:** {template.get('time_period', '1 year')}")
+                            st.markdown(f"**Minimum Records:** {template.get('min_records', 1)}")
+
+                            # Action buttons
+                            st.markdown("---")
+                            st.markdown("**Actions:**")
+
+                            if st.button(f"Fill Template Automatically", key=f"fill_{request['request_id']}"):
+                                with st.spinner("Filling template with your data..."):
+                                    # Call API to fill template
+                                    try:
+                                        response = requests.post(
+                                            f"{API_URL}/patient/fill-template",
+                                            json={
+                                                "request_id": request["request_id"],
+                                                "wallet_address": st.session_state.wallet_address
+                                            }
+                                        )
+
+                                        # If the first URL fails, try the alternative URL
+                                        if response.status_code == 404:
+                                            print("Trying alternative API URL...")
+                                            response = requests.post(
+                                                f"{API_URL}/api/patient/fill-template",
+                                                json={
+                                                    "request_id": request["request_id"],
+                                                    "wallet_address": st.session_state.wallet_address
+                                                }
+                                            )
+
+                                        if response.status_code == 200:
+                                            result = response.json()
+                                            st.success("Template filled successfully!")
+
+                                            # Update the request status
+                                            for req in st.session_state.data_requests:
+                                                if req["request_id"] == request["request_id"]:
+                                                    # Update the status to indicate a template has been filled
+                                                    if req.get("status") != "filled":
+                                                        req["status"] = "filled"
+                                                        req["templates_filled"] = 1
+                                                    else:
+                                                        # Increment the templates filled count
+                                                        req["templates_filled"] = req.get("templates_filled", 1) + 1
+
+                                                    # Store the template CID and CERT CID in a list
+                                                    if "templates" not in req:
+                                                        req["templates"] = []
+
+                                                    template_info = {
+                                                        "template_cid": result.get("template_cid"),
+                                                        "cert_cid": result.get("cert_cid"),
+                                                        "filled_at": int(time.time())
+                                                    }
+                                                    req["templates"].append(template_info)
+                                                    break
+
+                                            # Display details
+                                            st.info(f"Template CID: {result.get('template_cid', 'N/A')}")
+                                            st.info(f"CERT CID: {result.get('cert_cid', 'N/A')}")
+                                            st.info("Your data has been encrypted and is ready for the buyer to verify.")
+                                        else:
+                                            st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+                                    except Exception as e:
+                                        st.error(f"Error: {str(e)}")
+
+                            if st.button(f"Decline Request", key=f"decline_{request['request_id']}"):
+                                # Update the request status
+                                for req in st.session_state.data_requests:
+                                    if req["request_id"] == request["request_id"]:
+                                        req["status"] = "declined"
+                                        break
+
+                                st.success("Request declined. The hospital will be notified.")
+
+                # Display filled requests
+                filled_requests = [req for req in st.session_state.data_requests if req.get("status") == "filled"]
+                if filled_requests:
+                    st.subheader("Filled Requests")
+
+                    for request in filled_requests:
+                        templates_count = len(request.get("templates", [])) if "templates" in request else request.get("templates_filled", 1)
+                        with st.expander(f"Request {request['request_id']} - {request['template']['category']} (Filled {templates_count} templates)"):
+                            # Request details
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown(f"**Request ID:** {request['request_id']}")
+                                st.markdown(f"**Buyer:** `{request.get('buyer', 'Unknown')[:6]}...`")
+                                st.markdown(f"**Hospital:** `{request.get('hospital', 'Unknown')[:6]}...`")
+
+                            with col2:
+                                # Format timestamp
+                                timestamp = request.get("timestamp", 0)
+                                date_str = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                                st.markdown(f"**Requested:** {date_str}")
+
+                                # Payment amount
+                                amount = request.get("amount", 0.1)
+                                st.markdown(f"**Payment Amount:** {amount} ETH")
+
+                                # Status
+                                status = request.get("status", "filled")
+                                st.markdown(f"**Status:** {status.capitalize()}")
+
+                            # Display templates
+                            if "templates" in request and request["templates"]:
+                                st.subheader(f"Filled Templates ({len(request['templates'])})")
+                                for i, template in enumerate(request["templates"]):
+                                    st.markdown(f"**Template {i+1}:**")
+                                    st.markdown(f"**Template CID:** `{template.get('template_cid', 'N/A')}`")
+                                    st.markdown(f"**CERT CID:** `{template.get('cert_cid', 'N/A')}`")
+
+                                    # Format timestamp
+                                    filled_at = template.get("filled_at", 0)
+                                    if filled_at:
+                                        date_str = datetime.datetime.fromtimestamp(filled_at).strftime('%Y-%m-%d %H:%M:%S')
+                                        st.markdown(f"**Filled at:** {date_str}")
+
+                                    if i < len(request["templates"]) - 1:
+                                        st.markdown("---")
+                            # Fallback for older format
+                            elif "template_cid" in request:
+                                st.markdown(f"**Template CID:** `{request['template_cid']}`")
+                                if "cert_cid" in request:
+                                    st.markdown(f"**CERT CID:** `{request['cert_cid']}`")
+
+                            st.info("Your data has been encrypted and is ready for the buyer to verify.")
+
+                # Display declined requests
+                declined_requests = [req for req in st.session_state.data_requests if req.get("status") == "declined"]
+                if declined_requests:
+                    st.subheader("Declined Requests")
+
+                    for request in declined_requests:
+                        with st.expander(f"Request {request['request_id']} - {request['template']['category']} (Declined)"):
+                            # Request details
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown(f"**Request ID:** {request['request_id']}")
+                                st.markdown(f"**Buyer:** `{request.get('buyer', 'Unknown')[:6]}...`")
+                                st.markdown(f"**Hospital:** `{request.get('hospital', 'Unknown')[:6]}...`")
+
+                            with col2:
+                                # Format timestamp
+                                timestamp = request.get("timestamp", 0)
+                                date_str = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                                st.markdown(f"**Requested:** {date_str}")
+
+                                # Payment amount
+                                amount = request.get("amount", 0.1)
+                                st.markdown(f"**Payment Amount:** {amount} ETH")
+
+                                # Status
+                                status = request.get("status", "declined")
+                                st.markdown(f"**Status:** {status.capitalize()}")
+
+        with tab4:
             st.header("Data Purchase Requests")
 
             # Form for requesting data purchase
@@ -606,7 +956,6 @@ else:
                                 f"{API_URL}/purchase/verify",
                                 json={
                                     "request_id": request_id,
-                                    "template_cid": template_cid,
                                     "wallet_address": st.session_state.wallet_address
                                 }
                             )
@@ -618,7 +967,6 @@ else:
                                     f"{API_URL}/api/purchase/verify",
                                     json={
                                         "request_id": request_id,
-                                        "template_cid": template_cid,
                                         "wallet_address": st.session_state.wallet_address
                                     }
                                 )
@@ -640,9 +988,11 @@ else:
                                     st.session_state.verification_result = result
                                     st.session_state.verified_request_id = request_id
 
-                                    # Display template size if available
-                                    if "template_size" in result:
-                                        st.info(f"Template package size: {result['template_size']} bytes")
+                                    # Display records and patients count if available
+                                    if "records_count" in result:
+                                        st.info(f"Records count: {result['records_count']}")
+                                    if "patients_count" in result:
+                                        st.info(f"Patients count: {result['patients_count']}")
 
                                     st.info("You can now finalize the purchase on-chain")
 
@@ -860,8 +1210,39 @@ else:
                 patient_address = st.text_input("Patient Wallet Address",
                                               help="Enter the patient's wallet address")
                 date = st.date_input("Date")
-                diagnosis = st.text_input("Diagnosis")
-                notes = st.text_area("Notes")
+
+                # Medical category
+                category = st.selectbox(
+                    "Medical Category",
+                    ["Cardiology", "Oncology", "Neurology", "Pediatrics", "General"],
+                    help="The medical specialty of this record"
+                )
+
+                # Demographics section
+                st.subheader("Demographics")
+                col1, col2 = st.columns(2)
+                with col1:
+                    age = st.number_input("Age", min_value=0, max_value=120, value=35)
+                    gender = st.selectbox("Gender", ["Male", "Female", "Other"])
+                with col2:
+                    location = st.text_input("Location", placeholder="City, Country")
+                    ethnicity = st.text_input("Ethnicity", placeholder="Optional")
+
+                # Medical data section
+                st.subheader("Medical Data")
+                diagnosis = st.text_input("Diagnosis", help="Primary diagnosis")
+                treatment = st.text_input("Treatment", help="Prescribed treatment")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    medications = st.text_area("Medications", placeholder="List medications here", height=100)
+                with col2:
+                    lab_results = st.text_area("Lab Results", placeholder="Key lab results", height=100)
+
+                # Additional notes
+                notes = st.text_area("Additional Notes")
+
+                # Hospital info
                 hospital_info = st.text_input("Hospital Info", value="General Hospital",
                                             help="Information about the hospital")
 
@@ -871,14 +1252,26 @@ else:
                     if not patient_address:
                         st.error("Please enter the patient's wallet address")
                     else:
-                        # Step 1: Create the record
+                        # Step 1: Create the record with the detailed structure
                         record_data = {
                             "patientID": patient_address,  # Using patientID to match the expected format
-                            "date": str(date),
-                            "diagnosis": diagnosis,
-                            "notes": notes,
                             "doctorID": st.session_state.wallet_address,  # Using doctorID to match the expected format
-                            "hospitalInfo": hospital_info
+                            "date": str(date),
+                            "category": category,
+                            "hospitalInfo": hospital_info,
+                            "demographics": {
+                                "age": age,
+                                "gender": gender,
+                                "location": location if location else None,
+                                "ethnicity": ethnicity if ethnicity else None
+                            },
+                            "medical_data": {
+                                "diagnosis": diagnosis,
+                                "treatment": treatment if treatment else None,
+                                "medications": medications if medications else None,
+                                "lab_results": lab_results if lab_results else None
+                            },
+                            "notes": notes
                         }
 
                         # Display the record being created
@@ -1000,20 +1393,56 @@ else:
                                 st.subheader("Shared Medical Record")
                                 record = result["record"]
 
+                                # Basic information
                                 col1, col2 = st.columns(2)
                                 with col1:
                                     st.markdown(f"**Patient ID:** {record.get('patientID', 'N/A')}")
                                     st.markdown(f"**Date:** {record.get('date', 'N/A')}")
-                                    st.markdown(f"**Diagnosis:** {record.get('diagnosis', 'N/A')}")
+                                    st.markdown(f"**Category:** {record.get('category', 'General')}")
 
                                 with col2:
                                     st.markdown(f"**Doctor ID:** {record.get('doctorID', 'N/A')}")
+                                    st.markdown(f"**Hospital:** {record.get('hospitalInfo', 'N/A')}")
                                     st.markdown(f"**Shared By:** {result.get('shared_by', 'N/A')}")
-                                    shared_at = datetime.datetime.fromtimestamp(result.get('shared_at', 0))
-                                    st.markdown(f"**Shared At:** {shared_at.strftime('%Y-%m-%d %H:%M:%S')}")
 
-                                st.markdown("**Notes:**")
-                                st.text_area("Notes", value=record.get('notes', ''), height=150, disabled=True)
+                                # Sharing information
+                                shared_at = datetime.datetime.fromtimestamp(result.get('shared_at', 0))
+                                st.markdown(f"**Shared At:** {shared_at.strftime('%Y-%m-%d %H:%M:%S')}")
+
+                                # Demographics
+                                st.subheader("Demographics")
+                                demographics = record.get('demographics', {})
+                                if demographics:
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.markdown(f"**Age:** {demographics.get('age', 'N/A')}")
+                                        st.markdown(f"**Gender:** {demographics.get('gender', 'N/A')}")
+                                    with col2:
+                                        st.markdown(f"**Location:** {demographics.get('location', 'N/A')}")
+                                        st.markdown(f"**Ethnicity:** {demographics.get('ethnicity', 'N/A')}")
+                                else:
+                                    st.info("No demographics information available")
+
+                                # Medical data
+                                st.subheader("Medical Data")
+                                medical_data = record.get('medical_data', {})
+                                if medical_data:
+                                    st.markdown(f"**Diagnosis:** {medical_data.get('diagnosis', 'N/A')}")
+                                    st.markdown(f"**Treatment:** {medical_data.get('treatment', 'N/A')}")
+
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.markdown("**Medications:**")
+                                        st.text_area("Medications", value=medical_data.get('medications', ''), height=100, disabled=True)
+                                    with col2:
+                                        st.markdown("**Lab Results:**")
+                                        st.text_area("Lab Results", value=medical_data.get('lab_results', ''), height=100, disabled=True)
+                                else:
+                                    st.info("No detailed medical data available")
+
+                                # Notes
+                                st.subheader("Additional Notes")
+                                st.text_area("Notes", value=record.get('notes', ''), height=100, disabled=True)
 
                                 # Display sharing details
                                 st.subheader("Sharing Details")
@@ -1040,49 +1469,279 @@ else:
     elif role == "Hospital":
         st.title("Hospital Dashboard")
 
+        # Add auto-refresh functionality
+        if "hospital_auto_refresh" not in st.session_state:
+            st.session_state.hospital_auto_refresh = False
+            st.session_state.hospital_last_refresh = 0
+
+        # Check if it's time for auto-refresh (every 30 seconds)
+        current_time = int(time.time())
+        if st.session_state.hospital_auto_refresh and (current_time - st.session_state.hospital_last_refresh) > 30:
+            st.session_state.hospital_last_refresh = current_time
+            st.session_state.trigger_rerun = True
+
         # Tabs for different actions
         tab1, tab2, tab3 = st.tabs(["Purchase Requests", "Manage Group", "Signature Openings"])
 
         with tab1:
             st.header("Data Purchase Requests")
 
+            # Initialize purchase_requests in session state if not present
+            if "purchase_requests" not in st.session_state:
+                st.session_state.purchase_requests = []
+                st.session_state.last_refresh_time = 0
+
             # Button to check for new requests
-            if st.button("Check for New Requests"):
-                st.success("Checking for new requests...")
-                # In a real implementation, this would query the blockchain
-                # For demo purposes, we'll just show a message
-                st.info("Found 1 new request. See details below.")
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                if st.button("Check for New Requests", key="check_requests"):
+                    with st.spinner("Fetching purchase requests from the blockchain and API..."):
+                        try:
+                            # Call API to get transactions
+                            response = requests.get(
+                                f"{API_URL}/transactions",
+                                params={
+                                    "wallet_address": st.session_state.wallet_address
+                                }
+                            )
 
-                # Create a sample request for demo purposes
-                if "purchase_requests" not in st.session_state:
+                            # If the first URL fails, try the alternative URL
+                            if response.status_code == 404:
+                                print("Trying alternative API URL...")
+                                response = requests.get(
+                                    f"{API_URL}/api/transactions",
+                                    params={
+                                        "wallet_address": st.session_state.wallet_address
+                                    }
+                                )
+
+                            if response.status_code == 200:
+                                result = response.json()
+                                transactions = result.get("transactions", [])
+
+                                # Update the last refresh time
+                                st.session_state.last_refresh_time = int(time.time())
+
+                                # Filter for Request transactions that haven't been replied to
+                                new_requests = []
+
+                                # First, check for purchase requests in the local storage directory
+                                try:
+                                    # Check if the local storage directory exists
+                                    if os.path.exists("local_storage/purchases"):
+                                        # Get all purchase files
+                                        purchase_files = os.listdir("local_storage/purchases")
+                                        print(f"Found {len(purchase_files)} files in local_storage/purchases")
+
+                                        for file_name in purchase_files:
+                                            if not file_name.endswith(".json"):
+                                                continue
+
+                                            file_path = f"local_storage/purchases/{file_name}"
+                                            print(f"Processing file: {file_path}")
+
+                                            try:
+                                                with open(file_path, "r") as f:
+                                                    purchase_data = json.load(f)
+
+                                                # Print the purchase data for debugging
+                                                print(f"Purchase data: {purchase_data}")
+                                                print(f"Status: {purchase_data.get('status')}")
+
+                                                # Check if this is a pending request (not replied to)
+                                                if purchase_data.get("status") == "pending":
+                                                    print(f"Found pending request: {purchase_data.get('request_id')}")
+
+                                                    # Convert to request format
+                                                    new_request = {
+                                                        "request_id": purchase_data.get("request_id"),
+                                                        "buyer": purchase_data.get("buyer", "Unknown"),
+                                                        "template_hash": purchase_data.get("template_hash", ""),
+                                                        "amount": purchase_data.get("amount", 0.1),
+                                                        "timestamp": purchase_data.get("timestamp", int(time.time())),
+                                                        "template": purchase_data.get("template", {
+                                                            "category": "General",
+                                                            "demographics": {},
+                                                            "medical_data": {},
+                                                            "time_period": "1 year",
+                                                            "min_records": 10
+                                                        })
+                                                    }
+
+                                                    # Add to new requests
+                                                    new_requests.append(new_request)
+                                                    print(f"Added request to new_requests list. Total: {len(new_requests)}")
+                                            except Exception as e:
+                                                print(f"Error processing file {file_name}: {str(e)}")
+                                except Exception as e:
+                                    print(f"Error reading local storage: {str(e)}")
+
+                                # Then, also check transactions for any we might have missed
+                                print(f"Checking {len(transactions)} transactions for purchase requests...")
+                                for tx in transactions:
+                                    if tx.get("type") == "Request":
+                                        request_id = tx.get("request_id")
+                                        print(f"Found Request transaction with ID: {request_id}")
+
+                                        # Check if this request has already been replied to
+                                        replied = any(t.get("type") == "Hospital Reply" and t.get("request_id") == request_id for t in transactions)
+                                        if replied:
+                                            print(f"Request {request_id} has already been replied to, skipping")
+
+                                        # Check if we already added this request from local storage
+                                        already_added = any(req["request_id"] == request_id for req in new_requests)
+                                        if already_added:
+                                            print(f"Request {request_id} was already added from local storage, skipping")
+
+                                        if not replied and not already_added:
+                                            print(f"Processing new request from transaction: {request_id}")
+
+                                            # Convert transaction to request format
+                                            new_request = {
+                                                "request_id": request_id,
+                                                "buyer": tx.get("buyer", tx.get("from", "Unknown")),
+                                                "template_hash": tx.get("template_hash", ""),
+                                                "amount": tx.get("amount", 0.1),
+                                                "timestamp": tx.get("timestamp", int(time.time())),
+                                                "template": {}
+                                            }
+
+                                            # Check if details contains a full template
+                                            if "details" in tx and isinstance(tx["details"], dict):
+                                                details = tx["details"]
+                                                print(f"Transaction details: {details}")
+
+                                                # Try to extract template from details
+                                                if "template" in details and isinstance(details["template"], dict):
+                                                    # Use the full template if available
+                                                    new_request["template"] = details["template"]
+                                                    print(f"Using full template from details: {new_request['template']}")
+                                                else:
+                                                    # Otherwise build from fields
+                                                    new_request["template"] = {
+                                                        "category": details.get("category", "General"),
+                                                        "demographics": {},
+                                                        "medical_data": {},
+                                                        "time_period": details.get("time_period", "1 year"),
+                                                        "min_records": details.get("min_records", 10)
+                                                    }
+                                                    print(f"Building template from fields: {new_request['template']}")
+
+                                                    # Extract fields from details
+                                                    fields = details.get("fields", [])
+                                                    print(f"Fields from details: {fields}")
+                                                    for field in fields:
+                                                        field_lower = field.lower()
+                                                        if field_lower in ["age", "gender", "location", "ethnicity"]:
+                                                            new_request["template"]["demographics"][field_lower] = True
+                                                        elif field_lower in ["diagnosis", "treatment", "medications", "lab_results"]:
+                                                            new_request["template"]["medical_data"][field_lower] = True
+                                            else:
+                                                print(f"No details found in transaction or details is not a dictionary")
+
+                                            new_requests.append(new_request)
+                                            print(f"Added request from transaction. Total requests: {len(new_requests)}")
+
+                                # Add new requests to the list
+                                if new_requests:
+                                    # Add only requests that aren't already in the list
+                                    existing_ids = {req["request_id"] for req in st.session_state.purchase_requests}
+                                    new_count = 0
+
+                                    for req in new_requests:
+                                        if req["request_id"] not in existing_ids:
+                                            st.session_state.purchase_requests.append(req)
+                                            new_count += 1
+
+                                    if new_count > 0:
+                                        st.success(f"Found {new_count} new request(s)!")
+                                    else:
+                                        st.info("No new requests found.")
+                                else:
+                                    st.info("No new requests found.")
+                            else:
+                                st.error(f"Error fetching requests: {response.json().get('detail', 'Unknown error')}")
+
+                                # For demo purposes, add a sample request if no requests exist
+                                if not st.session_state.purchase_requests:
+                                    # Add a sample request
+                                    sample_request = {
+                                        "request_id": f"sample-request-{int(time.time())}",
+                                        "buyer": "0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce",  # Buyer address
+                                        "template_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                                        "amount": 0.1,
+                                        "timestamp": int(time.time()),
+                                        "template": {
+                                            "category": "Cardiology",
+                                            "demographics": {
+                                                "age": True,
+                                                "gender": True,
+                                                "location": False,
+                                                "ethnicity": False
+                                            },
+                                            "medical_data": {
+                                                "diagnosis": True,
+                                                "treatment": True,
+                                                "medications": False,
+                                                "lab_results": False
+                                            },
+                                            "time_period": "1 year",
+                                            "min_records": 10
+                                        }
+                                    }
+                                    st.session_state.purchase_requests.append(sample_request)
+                                    st.success("Added a sample request for demonstration purposes.")
+                        except Exception as e:
+                            st.error(f"Error connecting to API: {str(e)}")
+
+                            # For demo purposes, add a sample request if no requests exist
+                            if not st.session_state.purchase_requests:
+                                # Add a sample request
+                                sample_request = {
+                                    "request_id": f"sample-request-{int(time.time())}",
+                                    "buyer": "0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce",  # Buyer address
+                                    "template_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                                    "amount": 0.1,
+                                    "timestamp": int(time.time()),
+                                    "template": {
+                                        "category": "Cardiology",
+                                        "demographics": {
+                                            "age": True,
+                                            "gender": True,
+                                            "location": False,
+                                            "ethnicity": False
+                                        },
+                                        "medical_data": {
+                                            "diagnosis": True,
+                                            "treatment": True,
+                                            "medications": False,
+                                            "lab_results": False
+                                        },
+                                        "time_period": "1 year",
+                                        "min_records": 10
+                                    }
+                                }
+                                st.session_state.purchase_requests.append(sample_request)
+                                st.success("Added a sample request for demonstration purposes.")
+
+            with col2:
+                # Add auto-refresh toggle
+                auto_refresh = st.checkbox("Auto-refresh", value=st.session_state.hospital_auto_refresh, key="hospital_auto_refresh_toggle")
+                if auto_refresh != st.session_state.hospital_auto_refresh:
+                    st.session_state.hospital_auto_refresh = auto_refresh
+                    st.session_state.hospital_last_refresh = int(time.time())
+                    if auto_refresh:
+                        st.success("Auto-refresh enabled. Dashboard will refresh every 30 seconds.")
+                    else:
+                        st.info("Auto-refresh disabled.")
+
+            with col3:
+                # Add a clear button to remove all requests (for testing)
+                if st.button("Clear All", key="clear_requests"):
                     st.session_state.purchase_requests = []
-
-                    # Add a sample request
-                    sample_request = {
-                        "request_id": "sample-request-123",
-                        "buyer": "0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce",  # Buyer address
-                        "template_hash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                        "amount": 0.1,
-                        "timestamp": int(time.time()),
-                        "template": {
-                            "category": "Cardiology",
-                            "demographics": {
-                                "age": True,
-                                "gender": True,
-                                "location": False,
-                                "ethnicity": False
-                            },
-                            "medical_data": {
-                                "diagnosis": True,
-                                "treatment": True,
-                                "medications": False,
-                                "lab_results": False
-                            },
-                            "time_period": "1 year",
-                            "min_records": 10
-                        }
-                    }
-                    st.session_state.purchase_requests.append(sample_request)
+                    st.session_state.last_refresh_time = 0
+                    st.success("All requests cleared.")
+                    st.rerun()
 
             # Display pending requests
             if "purchase_requests" in st.session_state and st.session_state.purchase_requests:
@@ -1129,91 +1788,145 @@ else:
 
                         # Form for replying to this request
                         with st.form(f"reply_form_{i}"):
-                            st.markdown("**Reply to Request**")
-                            template_cid = st.text_input("Template CID", key=f"template_cid_{i}")
-                            submit_button = st.form_submit_button("Submit Reply")
+                            st.markdown("**Confirm Data Availability**")
+
+                            # Add fields to provide information about available data
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                records_count = st.number_input("Number of Records Available", min_value=1, value=15, key=f"records_count_{i}")
+                            with col2:
+                                patients_count = st.number_input("Number of Patients", min_value=1, value=3, key=f"patients_count_{i}")
+
+                            # Add estimated price per record
+                            price_per_record = st.number_input("Price per Record (ETH)", min_value=0.001, value=0.01, step=0.001, key=f"price_{i}")
+
+                            # Calculate total value
+                            total_value = records_count * price_per_record
+                            st.info(f"Total estimated value: {total_value:.4f} ETH")
+
+                            submit_button = st.form_submit_button("Confirm Availability")
 
                             if submit_button:
-                                if not template_cid:
-                                    st.error("Please enter a Template CID")
-                                else:
-                                    # Call API to reply to purchase request
-                                    try:
+                                # Call API to reply to purchase request
+                                try:
+                                    response = requests.post(
+                                        f"{API_URL}/purchase/reply",
+                                        json={
+                                            "request_id": request["request_id"],
+                                            "records_count": records_count,
+                                            "patients_count": patients_count,
+                                            "price_per_record": price_per_record,
+                                            "wallet_address": st.session_state.wallet_address
+                                        }
+                                    )
+
+                                    # If the first URL fails, try the alternative URL
+                                    if response.status_code == 404:
+                                        print("Trying alternative API URL...")
                                         response = requests.post(
-                                            f"{API_URL}/purchase/reply",
+                                            f"{API_URL}/api/purchase/reply",
                                             json={
                                                 "request_id": request["request_id"],
-                                                "template_cid": template_cid,
+                                                "records_count": records_count,
+                                                "patients_count": patients_count,
+                                                "price_per_record": price_per_record,
                                                 "wallet_address": st.session_state.wallet_address
                                             }
                                         )
 
-                                        # If the first URL fails, try the alternative URL
-                                        if response.status_code == 404:
-                                            print("Trying alternative API URL...")
-                                            response = requests.post(
-                                                f"{API_URL}/api/purchase/reply",
-                                                json={
-                                                    "request_id": request["request_id"],
-                                                    "template_cid": template_cid,
-                                                    "wallet_address": st.session_state.wallet_address
-                                                }
-                                            )
+                                    if response.status_code == 200:
+                                        result = response.json()
+                                        st.success("Confirmation submitted successfully!")
+                                        st.markdown(f"**Transaction Hash:** {result.get('transaction_hash', 'N/A')[:10]}...{result.get('transaction_hash', 'N/A')[-6:]}")
 
-                                        if response.status_code == 200:
-                                            result = response.json()
-                                            st.success("Reply submitted successfully!")
-                                            st.markdown(f"**Transaction Hash:** {result.get('transaction_hash', 'N/A')[:10]}...{result.get('transaction_hash', 'N/A')[-6:]}")
+                                        # Store the transaction in session state if available
+                                        if "transaction" in result:
+                                            if "transaction_history" not in st.session_state:
+                                                st.session_state.transaction_history = []
+                                            st.session_state.transaction_history.append(result["transaction"])
 
-                                            # Remove the request from the list
-                                            st.session_state.purchase_requests.pop(i)
-                                            st.info("Request has been processed and removed from the pending list.")
-                                            st.rerun()
-                                        else:
-                                            st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
-                                    except Exception as e:
-                                        st.error(f"Error: {str(e)}")
+                                        # Remove the request from the list
+                                        st.session_state.purchase_requests.pop(i)
+                                        st.info("Request has been processed and removed from the pending list.")
+
+                                        # Set a flag to trigger rerun after the form is processed
+                                        st.session_state.trigger_rerun = True
+                                    else:
+                                        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+                                except Exception as e:
+                                    st.error(f"Error: {str(e)}")
             else:
                 st.info("No pending requests. Requests from buyers will appear here.")
 
             # Form for manually replying to purchase requests
-            with st.expander("Manually Reply to Purchase Request"):
+            with st.expander("Manually Confirm Data Availability"):
                 with st.form("reply_purchase_form"):
                     request_id = st.text_input("Request ID")
-                    template_cid = st.text_input("Template CID")
 
-                    submit_button = st.form_submit_button("Submit Reply")
+                    # Add fields to provide information about available data
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        records_count = st.number_input("Number of Records Available", min_value=1, value=15)
+                    with col2:
+                        patients_count = st.number_input("Number of Patients", min_value=1, value=3)
+
+                    # Add estimated price per record
+                    price_per_record = st.number_input("Price per Record (ETH)", min_value=0.001, value=0.01, step=0.001)
+
+                    # Calculate total value
+                    total_value = records_count * price_per_record
+                    st.info(f"Total estimated value: {total_value:.4f} ETH")
+
+                    submit_button = st.form_submit_button("Confirm Availability")
 
                     if submit_button:
-                        # Call API to reply to purchase request
-                        try:
-                            response = requests.post(
-                                f"{API_URL}/purchase/reply",
-                                json={
-                                    "request_id": request_id,
-                                    "template_cid": template_cid,
-                                    "wallet_address": st.session_state.wallet_address
-                                }
-                            )
-
-                            # If the first URL fails, try the alternative URL
-                            if response.status_code == 404:
-                                print("Trying alternative API URL...")
+                        if not request_id:
+                            st.error("Please enter a Request ID")
+                        else:
+                            # Call API to reply to purchase request
+                            try:
                                 response = requests.post(
-                                    f"{API_URL}/api/purchase/reply",
+                                    f"{API_URL}/purchase/reply",
                                     json={
                                         "request_id": request_id,
-                                        "template_cid": template_cid,
+                                        "records_count": records_count,
+                                        "patients_count": patients_count,
+                                        "price_per_record": price_per_record,
                                         "wallet_address": st.session_state.wallet_address
                                     }
                                 )
 
-                            if response.status_code == 200:
-                                st.success("Reply submitted successfully!")
-                            else:
-                                st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
-                        except Exception as e:
-                            st.error(f"Error: {str(e)}")
+                                # If the first URL fails, try the alternative URL
+                                if response.status_code == 404:
+                                    print("Trying alternative API URL...")
+                                    response = requests.post(
+                                        f"{API_URL}/api/purchase/reply",
+                                        json={
+                                            "request_id": request_id,
+                                            "records_count": records_count,
+                                            "patients_count": patients_count,
+                                            "price_per_record": price_per_record,
+                                            "wallet_address": st.session_state.wallet_address
+                                        }
+                                    )
+
+                                if response.status_code == 200:
+                                    result = response.json()
+                                    st.success("Confirmation submitted successfully!")
+                                    st.markdown(f"**Transaction Hash:** {result.get('transaction_hash', 'N/A')[:10]}...{result.get('transaction_hash', 'N/A')[-6:]}")
+
+                                    # Store the transaction in session state if available
+                                    if "transaction" in result:
+                                        if "transaction_history" not in st.session_state:
+                                            st.session_state.transaction_history = []
+                                        st.session_state.transaction_history.append(result["transaction"])
+
+                                    # Set a flag to trigger rerun after the form is processed
+                                    st.session_state.trigger_rerun = True
+                                else:
+                                    st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
 
         with tab2:
             st.header("Manage Group Signatures")
@@ -1227,7 +1940,7 @@ else:
         st.title("Data Buyer Dashboard")
 
         # Tabs for different actions
-        tab1, tab2 = st.tabs(["Request Data", "My Purchases"])
+        tab1, tab2, tab3 = st.tabs(["Request Data", "My Purchases", "Filled Templates"])
 
         with tab1:
             st.header("Request Healthcare Data")
@@ -1496,13 +2209,26 @@ else:
                                 tx_hash = tx.get("tx_hash", "N/A")
                                 tx_hash_short = f"{tx_hash[:8]}...{tx_hash[-6:]}" if tx_hash != "N/A" else "N/A"
 
+                                # Convert 'N/A' to None for numeric fields to avoid PyArrow conversion errors
+                                gas_fee = tx.get("gas_fee")
+                                if gas_fee is None or gas_fee == "N/A":
+                                    gas_fee = None
+                                else:
+                                    gas_fee = float(gas_fee)
+
+                                amount = tx.get("amount")
+                                if amount is None or amount == "N/A":
+                                    amount = None
+                                else:
+                                    amount = float(amount)
+
                                 tx_data.append({
                                     "Type": tx["type"],
                                     "Status": tx["status"],
                                     "Timestamp": tx_time,
                                     "TX Hash": tx_hash_short,
-                                    "Gas Fee (ETH)": tx.get("gas_fee", "N/A"),
-                                    "Amount (ETH)": tx.get("amount", "N/A")
+                                    "Gas Fee (ETH)": gas_fee,
+                                    "Amount (ETH)": amount
                                 })
 
                             # Display as a table
@@ -1532,10 +2258,227 @@ else:
                                 st.json(latest_tx["details"])
                             elif latest_tx["type"] == "Hospital Reply":
                                 st.markdown("**Reply Details:**")
-                                st.markdown(f"**Template CID:** `{latest_tx.get('template_cid', 'N/A')}`")
                                 st.markdown(f"**Hospital:** `{latest_tx.get('hospital', 'N/A')}`")
                                 st.markdown(f"**Records Count:** {latest_tx['details'].get('records_count', 'N/A')}")
                                 st.markdown(f"**Patients Count:** {latest_tx['details'].get('patients_count', 'N/A')}")
+                                st.markdown(f"**Price per Record:** {latest_tx['details'].get('price_per_record', 'N/A')} ETH")
+                                st.markdown(f"**Total Value:** {latest_tx['details'].get('total_value', 'N/A')} ETH")
+
+                                # Check if there's a template CID
+                                template_cid = latest_tx.get('template_cid')
+                                if template_cid:
+                                    st.markdown(f"**Template CID:** `{template_cid}`")
+
+                                    # Create columns for the buttons
+                                    btn_col1, btn_col2 = st.columns(2)
+
+                                    # Add a button to view the template data
+                                    with btn_col1:
+                                        if st.button(f"View Template Data", key=f"view_template_{request_id}"):
+                                            try:
+                                                # Try to fetch the template data from the API
+                                                template_response = requests.get(
+                                                    f"{API_URL}/template/{template_cid}",
+                                                    params={"wallet_address": st.session_state.wallet_address}
+                                                )
+
+                                                # If the first URL fails, try the alternative URL
+                                                if template_response.status_code == 404:
+                                                    template_response = requests.get(
+                                                        f"{API_URL}/api/template/{template_cid}",
+                                                        params={"wallet_address": st.session_state.wallet_address}
+                                                    )
+
+                                                if template_response.status_code == 200:
+                                                    template_data = template_response.json()
+
+                                                    # Display the template data
+                                                    st.subheader("Template Data")
+
+                                                    # Show template details
+                                                    st.markdown("**Template Details:**")
+                                                    if "template" in template_data:
+                                                        st.json(template_data["template"])
+
+                                                    # Show records
+                                                    if "records" in template_data and template_data["records"]:
+                                                        st.markdown(f"**Records ({len(template_data['records'])}):**")
+
+                                                        # Create tabs for each record
+                                                        record_tabs = st.tabs([f"Record {i+1}" for i in range(min(5, len(template_data["records"])))])
+
+                                                        for i, tab in enumerate(record_tabs):
+                                                            if i < len(template_data["records"]):
+                                                                record = template_data["records"][i]
+                                                                with tab:
+                                                                    st.json(record)
+
+                                                        # If there are more than 5 records, show a message
+                                                        if len(template_data["records"]) > 5:
+                                                            st.info(f"Showing 5 of {len(template_data['records'])} records. The full dataset is available for analysis.")
+                                                    else:
+                                                        st.warning("No records found in the template data.")
+                                                else:
+                                                    st.error(f"Error fetching template data: {template_response.json().get('detail', 'Unknown error')}")
+                                            except Exception as e:
+                                                st.error(f"Error: {str(e)}")
+
+                                    # Add a button to verify the template
+                                    with btn_col2:
+                                        if st.button(f"Verify Template", key=f"verify_template_{request_id}"):
+                                            # Show verification steps
+                                            with st.status("Verifying template...", expanded=True) as status:
+                                                st.write("Retrieving template package from IPFS...")
+                                                time.sleep(0.5)  # Simulate delay
+
+                                                # Call API to verify purchase off-chain
+                                                try:
+                                                    response = requests.post(
+                                                        f"{API_URL}/purchase/verify",
+                                                        json={
+                                                            "request_id": request_id,
+                                                            "wallet_address": st.session_state.wallet_address,
+                                                            "template_cid": template_cid
+                                                        }
+                                                    )
+
+                                                    # If the first URL fails, try the alternative URL
+                                                    if response.status_code == 404:
+                                                        print("Trying alternative API URL...")
+                                                        response = requests.post(
+                                                            f"{API_URL}/api/purchase/verify",
+                                                            json={
+                                                                "request_id": request_id,
+                                                                "wallet_address": st.session_state.wallet_address,
+                                                                "template_cid": template_cid
+                                                            }
+                                                        )
+
+                                                    st.write("Verifying hospital signature...")
+                                                    time.sleep(0.5)  # Simulate delay
+
+                                                    st.write("Verifying Merkle proofs...")
+                                                    time.sleep(0.5)  # Simulate delay
+
+                                                    st.write("Verifying group signatures...")
+                                                    time.sleep(0.5)  # Simulate delay
+
+                                                    if response.status_code == 200:
+                                                        result = response.json()
+                                                        if result["verified"]:
+                                                            status.update(label="Verification complete!", state="complete")
+                                                            st.success("Verification successful!")
+                                                            st.session_state.verification_result = result
+                                                            st.session_state.verified_request_id = request_id
+
+                                                            # Display records and patients count if available
+                                                            if "records_count" in result:
+                                                                st.info(f"Records count: {result['records_count']}")
+                                                            if "patients_count" in result:
+                                                                st.info(f"Patients count: {result['patients_count']}")
+
+                                                            st.info("You can now finalize the purchase on-chain")
+
+                                                            # Display recipients in a nicer format
+                                                            st.subheader("Payment Recipients")
+                                                            st.write("The following addresses will receive payment if you approve:")
+
+                                                            for i, recipient in enumerate(result["recipients"]):
+                                                                # Check if it's a known address
+                                                                recipient_name = "Unknown"
+                                                                for name, info in TEST_ACCOUNTS.items():
+                                                                    if info["address"].lower() == recipient.lower():
+                                                                        recipient_name = f"{name} ({info['role']})"
+                                                                        break
+
+                                                                st.markdown(f"**{i+1}.** `{recipient}` - {recipient_name}")
+
+                                                            # Add a button to finalize the purchase
+                                                            if st.button("Finalize Purchase", key=f"finalize_{request_id}"):
+                                                                try:
+                                                                    finalize_response = requests.post(
+                                                                        f"{API_URL}/purchase/finalize",
+                                                                        json={
+                                                                            "request_id": request_id,
+                                                                            "approved": True,
+                                                                            "recipients": result["recipients"],
+                                                                            "wallet_address": st.session_state.wallet_address
+                                                                        }
+                                                                    )
+
+                                                                    if finalize_response.status_code == 200:
+                                                                        finalize_result = finalize_response.json()
+                                                                        st.success("Purchase finalized successfully!")
+                                                                        st.markdown(f"**Transaction Hash:** `{finalize_result.get('transaction_hash', 'N/A')}`")
+                                                                        st.rerun()
+                                                                    else:
+                                                                        st.error(f"Error finalizing purchase: {finalize_response.json().get('detail', 'Unknown error')}")
+                                                                except Exception as e:
+                                                                    st.error(f"Error finalizing purchase: {str(e)}")
+                                                        else:
+                                                            status.update(label="Verification failed", state="error")
+                                                            st.error(f"Verification failed! {result.get('message', 'The data does not meet the requirements.')}")
+                                                    else:
+                                                        status.update(label="Verification failed", state="error")
+                                                        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+                                                except Exception as e:
+                                                    status.update(label="Verification failed", state="error")
+                                                    st.error(f"Error: {str(e)}")
+
+                                # Check if there's a template CID
+                                template_cid = latest_tx.get('template_cid')
+                                if template_cid:
+                                    st.markdown(f"**Template CID:** `{template_cid}`")
+
+                                    # Add a button to view the template data
+                                    if st.button(f"View Template Data for {template_cid[:8]}...", key=f"view_template_{request_id}"):
+                                        try:
+                                            # Try to fetch the template data from the API
+                                            template_response = requests.get(
+                                                f"{API_URL}/template/{template_cid}",
+                                                params={"wallet_address": st.session_state.wallet_address}
+                                            )
+
+                                            # If the first URL fails, try the alternative URL
+                                            if template_response.status_code == 404:
+                                                template_response = requests.get(
+                                                    f"{API_URL}/api/template/{template_cid}",
+                                                    params={"wallet_address": st.session_state.wallet_address}
+                                                )
+
+                                            if template_response.status_code == 200:
+                                                template_data = template_response.json()
+
+                                                # Display the template data
+                                                st.subheader("Template Data")
+
+                                                # Show template details
+                                                st.markdown("**Template Details:**")
+                                                if "template" in template_data:
+                                                    st.json(template_data["template"])
+
+                                                # Show records
+                                                if "records" in template_data and template_data["records"]:
+                                                    st.markdown(f"**Records ({len(template_data['records'])}):**")
+
+                                                    # Create tabs for each record
+                                                    record_tabs = st.tabs([f"Record {i+1}" for i in range(min(5, len(template_data["records"])))])
+
+                                                    for i, tab in enumerate(record_tabs):
+                                                        if i < len(template_data["records"]):
+                                                            record = template_data["records"][i]
+                                                            with tab:
+                                                                st.json(record)
+
+                                                    # If there are more than 5 records, show a message
+                                                    if len(template_data["records"]) > 5:
+                                                        st.info(f"Showing 5 of {len(template_data['records'])} records. The full dataset is available for analysis.")
+                                                else:
+                                                    st.warning("No records found in the template data.")
+                                            else:
+                                                st.error(f"Error fetching template data: {template_response.json().get('detail', 'Unknown error')}")
+                                        except Exception as e:
+                                            st.error(f"Error: {str(e)}")
                             elif latest_tx["type"] == "Verification":
                                 st.markdown("**Verification Details:**")
                                 st.markdown(f"**Verified:** {latest_tx['details'].get('verified', False)}")
@@ -1568,6 +2511,413 @@ else:
 
                 with history_tab2:
                     st.subheader("Purchase Workflow Visualization")
+
+        with tab3:
+            st.header("Filled Templates")
+
+            # Function to fetch filled templates from the API
+            def fetch_filled_templates():
+                try:
+                    # Call API to get filled templates
+                    response = requests.get(
+                        f"{API_URL}/buyer/filled-templates",
+                        params={
+                            "wallet_address": st.session_state.wallet_address
+                        }
+                    )
+
+                    # If the first URL fails, try the alternative URL
+                    if response.status_code == 404:
+                        print("Trying alternative API URL...")
+                        response = requests.get(
+                            f"{API_URL}/api/buyer/filled-templates",
+                            params={
+                                "wallet_address": st.session_state.wallet_address
+                            }
+                        )
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        return result.get("templates", [])
+                    else:
+                        print(f"Error fetching filled templates: {response.status_code}")
+                        return []
+                except Exception as e:
+                    print(f"Error fetching filled templates: {str(e)}")
+                    return []
+
+            # For demo purposes, let's create some sample filled templates
+            # In a real implementation, these would come from the API
+            if "filled_templates" not in st.session_state:
+                # Try to fetch from API first
+                api_templates = fetch_filled_templates()
+
+                if api_templates:
+                    st.session_state.filled_templates = api_templates
+                else:
+                    # Use sample data as fallback
+                    st.session_state.filled_templates = [
+                        {
+                            "request_id": "req_001",
+                            "patient": "0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A",  # Patient 1 address
+                            "hospital": "0x28B317594b44483D24EE8AdCb13A1b148497C6ba",  # Hospital address
+                            "template_cid": "template_req_001_1234567890",
+                            "cert_cid": "cert_req_001_1234567890",
+                            "status": "filled",
+                            "timestamp": int(time.time()) - 3600,  # 1 hour ago
+                            "template": {
+                                "category": "Cardiology",
+                                "demographics": {"age": True, "gender": True},
+                                "medical_data": {"diagnosis": True, "treatment": True},
+                                "time_period": "1 year",
+                                "min_records": 1
+                            }
+                        }
+                    ]
+
+            # Add a refresh button
+            if st.button("Refresh Filled Templates"):
+                api_templates = fetch_filled_templates()
+                if api_templates:
+                    st.session_state.filled_templates = api_templates
+                st.success("Filled templates refreshed!")
+
+            # Display filled templates
+            if not st.session_state.filled_templates:
+                st.info("No filled templates found. Templates will appear here when patients fill out your data requests.")
+            else:
+                # Group templates by request ID
+                request_ids = {}
+                for template in st.session_state.filled_templates:
+                    request_id = template.get("request_id")
+                    if request_id not in request_ids:
+                        request_ids[request_id] = []
+                    request_ids[request_id].append(template)
+
+                # Display templates grouped by request ID
+                for request_id, templates in request_ids.items():
+                    st.subheader(f"Request: {request_id} ({len(templates)} templates)")
+
+                    # Display request details
+                    if templates:
+                        first_template = templates[0]
+                        st.markdown("**Request Details**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown(f"**Request ID:** {request_id}")
+                            st.markdown(f"**Hospital:** `{first_template.get('hospital', 'Unknown')[:8]}...`")
+                            st.markdown(f"**Category:** {first_template.get('template', {}).get('category', 'Unknown')}")
+                        with col2:
+                            # Format timestamp
+                            timestamp = first_template.get("timestamp", 0)
+                            date_str = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                            st.markdown(f"**Timestamp:** {date_str}")
+                            st.markdown(f"**Templates Count:** {len(templates)}")
+
+                    # Display templates
+                    st.markdown("**Filled Templates**")
+
+                    # Create tabs for each template
+                    template_tabs = st.tabs([f"Template {i+1} - Patient: {template.get('patient', 'Unknown')[:8]}..." for i, template in enumerate(templates)])
+
+                    # Fill each tab with template content
+                    for i, (tab, template) in enumerate(zip(template_tabs, templates)):
+                        with tab:
+                                # Template details
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.markdown(f"**Template CID:** `{template.get('template_cid', 'N/A')}`")
+                                    st.markdown(f"**CERT CID:** `{template.get('cert_cid', 'N/A')}`")
+
+                                    # Format patient address
+                                    patient = template.get("patient", "Unknown")
+                                    patient_display = patient
+                                    if len(patient) > 10:
+                                        patient_display = f"{patient[:6]}...{patient[-4:]}"
+
+                                    # Check if it's a known address
+                                    patient_name = "Unknown"
+                                    for name, info in TEST_ACCOUNTS.items():
+                                        if info["address"].lower() == patient.lower():
+                                            patient_name = f"{name} ({info['role']})"
+                                            break
+
+                                    st.markdown(f"**Patient:** `{patient_display}` - {patient_name}")
+
+                                with col2:
+                                    # Format timestamp
+                                    timestamp = template.get("timestamp", 0)
+                                    date_str = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                                    st.markdown(f"**Filled at:** {date_str}")
+
+                                    # Status
+                                    status = template.get("status", "filled")
+                                    st.markdown(f"**Status:** {status.capitalize()}")
+
+                                    # Verification status
+                                    verification_status = template.get("verified", False)
+                                    if verification_status:
+                                        st.markdown("**Verification:** ✅ Verified")
+                                    else:
+                                        st.markdown("**Verification:** ❌ Not verified")
+
+                                # Template content
+                                if "template" in template:
+                                    st.subheader("Template Content")
+                                    st.json(template["template"])
+
+                                # Action buttons
+                                st.markdown("---")
+                                st.markdown("**Actions:**")
+
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    # View template data button
+                                    if st.button(f"View Template Data", key=f"view_data_{template.get('template_cid')}"):
+                                        try:
+                                            # Try to fetch the template data from the API
+                                            template_response = requests.get(
+                                                f"{API_URL}/template/{template.get('template_cid')}",
+                                                params={
+                                                    "wallet_address": st.session_state.wallet_address,
+                                                    "cert_cid": template.get('cert_cid')
+                                                }
+                                            )
+
+                                            # If the first URL fails, try the alternative URL
+                                            if template_response.status_code == 404:
+                                                template_response = requests.get(
+                                                    f"{API_URL}/api/template/{template.get('template_cid')}",
+                                                    params={
+                                                        "wallet_address": st.session_state.wallet_address,
+                                                        "cert_cid": template.get('cert_cid')
+                                                    }
+                                                )
+
+                                            if template_response.status_code == 200:
+                                                template_data = template_response.json()
+
+                                                # Display the template data
+                                                st.subheader("Template Data")
+                                                st.json(template_data)
+                                            else:
+                                                st.error(f"Error fetching template data: {template_response.json().get('detail', 'Unknown error')}")
+                                        except Exception as e:
+                                            st.error(f"Error: {str(e)}")
+
+                                with col2:
+                                    # Verify template button
+                                    if st.button(f"Verify Template", key=f"verify_{template.get('template_cid')}"):
+                                        # Show verification steps
+                                        with st.status("Verifying template...", expanded=True) as status:
+                                            st.write("Retrieving template package from IPFS...")
+                                            time.sleep(0.5)  # Simulate delay
+
+                                            # Call API to verify template
+                                            try:
+                                                response = requests.post(
+                                                    f"{API_URL}/purchase/verify",
+                                                    json={
+                                                        "request_id": request_id,
+                                                        "wallet_address": st.session_state.wallet_address,
+                                                        "template_cid": template.get('template_cid')
+                                                    }
+                                                )
+
+                                                # If the first URL fails, try the alternative URL
+                                                if response.status_code == 404:
+                                                    print("Trying alternative API URL...")
+                                                    response = requests.post(
+                                                        f"{API_URL}/api/purchase/verify",
+                                                        json={
+                                                            "request_id": request_id,
+                                                            "wallet_address": st.session_state.wallet_address,
+                                                            "template_cid": template.get('template_cid')
+                                                        }
+                                                    )
+
+                                                st.write("Verifying hospital signature...")
+                                                time.sleep(0.5)  # Simulate delay
+
+                                                st.write("Verifying Merkle proofs...")
+                                                time.sleep(0.5)  # Simulate delay
+
+                                                st.write("Verifying group signatures...")
+                                                time.sleep(0.5)  # Simulate delay
+
+                                                if response.status_code == 200:
+                                                    result = response.json()
+                                                    if result["verified"]:
+                                                        status.update(label="Verification complete!", state="complete")
+                                                        st.success("Verification successful!")
+
+                                                        # Update the template status
+                                                        for t in st.session_state.filled_templates:
+                                                            if t.get("template_cid") == template.get("template_cid"):
+                                                                t["verified"] = True
+                                                                break
+
+                                                        # Display verification details
+                                                        st.markdown(f"**Merkle Root:** `{result.get('merkle_root', 'N/A')[:10]}...`")
+                                                        st.markdown(f"**Signature:** `{result.get('signature', 'N/A')[:10]}...`")
+
+                                                        # Display recipient
+                                                        if "recipients" in result and result["recipients"]:
+                                                            st.markdown(f"**Recipient:** `{result['recipients'][0]}`")
+                                                    else:
+                                                        status.update(label="Verification failed", state="error")
+                                                        st.error(f"Verification failed! {result.get('message', 'The data does not meet the requirements.')}")
+
+                                                        # Show revocation button
+                                                        if st.button("Request Revocation", key=f"revoke_{template.get('template_cid')}"):
+                                                            try:
+                                                                # Call API to request revocation
+                                                                revoke_response = requests.post(
+                                                                    f"{API_URL}/revocation/request",
+                                                                    json={
+                                                                        "request_id": request_id,
+                                                                        "template_cid": template.get('template_cid'),
+                                                                        "signature": result.get('signature', ''),
+                                                                        "wallet_address": st.session_state.wallet_address
+                                                                    }
+                                                                )
+
+                                                                if revoke_response.status_code == 200:
+                                                                    revoke_result = revoke_response.json()
+                                                                    st.success("Revocation request submitted successfully!")
+                                                                    st.markdown(f"**Transaction Hash:** `{revoke_result.get('transaction_hash', 'N/A')}`")
+                                                                    st.info("The Group Manager and Revocation Manager will process your request.")
+                                                                else:
+                                                                    st.error(f"Error requesting revocation: {revoke_response.json().get('detail', 'Unknown error')}")
+                                                            except Exception as e:
+                                                                st.error(f"Error requesting revocation: {str(e)}")
+                                                else:
+                                                    status.update(label="Verification failed", state="error")
+                                                    st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+                                            except Exception as e:
+                                                status.update(label="Verification failed", state="error")
+                                                st.error(f"Error: {str(e)}")
+
+                    # Add a button to verify all templates at once
+                    if st.button(f"Verify All Templates for Request {request_id}", key=f"verify_all_{request_id}"):
+                        # Show verification steps
+                        with st.status("Verifying all templates...", expanded=True) as status:
+                            st.write(f"Verifying {len(templates)} templates...")
+
+                            # Track verification results
+                            success_count = 0
+                            failed_templates = []
+
+                            # Verify each template
+                            for template in templates:
+                                st.write(f"Verifying template {template.get('template_cid')}...")
+                                time.sleep(0.3)  # Simulate delay
+
+                                # Call API to verify template
+                                try:
+                                    response = requests.post(
+                                        f"{API_URL}/purchase/verify",
+                                        json={
+                                            "request_id": request_id,
+                                            "wallet_address": st.session_state.wallet_address,
+                                            "template_cid": template.get('template_cid')
+                                        }
+                                    )
+
+                                    if response.status_code == 200:
+                                        result = response.json()
+                                        if result["verified"]:
+                                            success_count += 1
+                                            # Update the template status
+                                            for t in st.session_state.filled_templates:
+                                                if t.get("template_cid") == template.get("template_cid"):
+                                                    t["verified"] = True
+                                                    break
+                                        else:
+                                            failed_templates.append({
+                                                "template_cid": template.get('template_cid'),
+                                                "patient": template.get('patient'),
+                                                "signature": result.get('signature', '')
+                                            })
+                                    else:
+                                        failed_templates.append({
+                                            "template_cid": template.get('template_cid'),
+                                            "patient": template.get('patient'),
+                                            "error": response.json().get('detail', 'Unknown error')
+                                        })
+                                except Exception as e:
+                                    failed_templates.append({
+                                        "template_cid": template.get('template_cid'),
+                                        "patient": template.get('patient'),
+                                        "error": str(e)
+                                    })
+
+                            # Show verification results
+                            if success_count == len(templates):
+                                status.update(label="All templates verified successfully!", state="complete")
+                                st.success(f"All {len(templates)} templates verified successfully!")
+                            else:
+                                status.update(label=f"{success_count}/{len(templates)} templates verified", state="error")
+                                st.warning(f"{success_count}/{len(templates)} templates verified successfully. {len(failed_templates)} templates failed verification.")
+
+                                # Show failed templates
+                                if failed_templates:
+                                    st.subheader("Failed Templates")
+                                    for i, failed in enumerate(failed_templates):
+                                        st.markdown(f"**{i+1}. Template:** `{failed['template_cid']}`")
+                                        st.markdown(f"**Patient:** `{failed['patient']}`")
+                                        if "error" in failed:
+                                            st.markdown(f"**Error:** {failed['error']}")
+
+                                    # Show revocation button for all failed templates
+                                    if st.button("Request Revocation for All Failed Templates", key=f"revoke_all_{request_id}"):
+                                        # Call API to request revocation for all failed templates
+                                        revocation_results = []
+                                        for failed in failed_templates:
+                                            try:
+                                                # Call API to request revocation
+                                                revoke_response = requests.post(
+                                                    f"{API_URL}/revocation/request",
+                                                    json={
+                                                        "request_id": request_id,
+                                                        "template_cid": failed["template_cid"],
+                                                        "signature": failed.get("signature", ""),
+                                                        "wallet_address": st.session_state.wallet_address
+                                                    }
+                                                )
+
+                                                if revoke_response.status_code == 200:
+                                                    revoke_result = revoke_response.json()
+                                                    revocation_results.append({
+                                                        "template_cid": failed["template_cid"],
+                                                        "success": True,
+                                                        "transaction_hash": revoke_result.get("transaction_hash", "N/A")
+                                                    })
+                                                else:
+                                                    revocation_results.append({
+                                                        "template_cid": failed["template_cid"],
+                                                        "success": False,
+                                                        "error": revoke_response.json().get("detail", "Unknown error")
+                                                    })
+                                            except Exception as e:
+                                                revocation_results.append({
+                                                    "template_cid": failed["template_cid"],
+                                                    "success": False,
+                                                    "error": str(e)
+                                                })
+
+                                        # Show revocation results
+                                        st.subheader("Revocation Results")
+                                        success_count = sum(1 for r in revocation_results if r["success"])
+                                        st.info(f"{success_count}/{len(revocation_results)} revocation requests submitted successfully.")
+
+                                        for i, result in enumerate(revocation_results):
+                                            if result["success"]:
+                                                st.markdown(f"**{i+1}. Template:** `{result['template_cid']}` - ✅ Success")
+                                                st.markdown(f"**Transaction Hash:** `{result['transaction_hash']}`")
+                                            else:
+                                                st.markdown(f"**{i+1}. Template:** `{result['template_cid']}` - ❌ Failed")
+                                                st.markdown(f"**Error:** {result['error']}")
 
                     # Create a visual representation of the workflow
                     for request_id in request_ids:
@@ -1617,8 +2967,8 @@ else:
                                     st.info(f"**{tx_time}**: {tx['type']} - {tx['status']}")
                                 else:
                                     st.error(f"**{tx_time}**: {tx['type']} - {tx['status']}")
-            else:
-                st.info("No purchases. Your purchase requests will appear here.")
+                else:
+                    st.info("No purchases. Your purchase requests will appear here.")
 
             # Form for finalizing purchases
             with st.expander("Finalize Purchase"):
@@ -1790,3 +3140,11 @@ if st.session_state.get("trigger_rerun", False):
     st.session_state.trigger_rerun = False
     # Rerun the app
     st.rerun()
+# Check if auto-refresh is enabled for Hospital dashboard
+elif st.session_state.get("hospital_auto_refresh", False):
+    # Check if it's time for auto-refresh (every 30 seconds)
+    current_time = int(time.time())
+    last_refresh = st.session_state.get("hospital_last_refresh", 0)
+    if (current_time - last_refresh) > 30:
+        st.session_state.hospital_last_refresh = current_time
+        st.rerun()

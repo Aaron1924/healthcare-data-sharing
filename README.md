@@ -35,22 +35,7 @@ The system consists of three main components:
 2. Set up environment variables in `.env` file:
 
    ```bash
-   BASE_SEPOLIA_RPC_URL=https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf
-   CONTRACT_ADDRESS=0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6
-   PRIVATE_KEY=<your private key>
-
-   # Test accounts
-   PATIENT_ADDRESS=0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A
-   PATIENT_PRIVATE_KEY=91e5c2bed81b69f9176b6404710914e9bf36a6359122a2d1570116fc6322562e
-
-   DOCTOR_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-   DOCTOR_PRIVATE_KEY=ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-
-   GROUP_MANAGER_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-   GROUP_MANAGER_PRIVATE_KEY=59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
-
-   REVOCATION_MANAGER_ADDRESS=0x4b42EE1d1AEe8d3cc691661aa3b25D98Dac2FE46
-   REVOCATION_MANAGER_PRIVATE_KEY=4bf1c7cac1c53c7f7f7ddcc979b159d66a3d2d721fa4053330adbb100be628a0
+  copy .env.example la duoc roi
    ```
 
 3. Run the application using one of the following methods:
@@ -80,17 +65,33 @@ streamlit run app/main.py
 
 After running the above commands, access the UI at [http://localhost:8501](http://localhost:8501)
 
-## Contract Deployment
+## Smart Contract
 
-The project uses Hardhat to deploy and verify the DataHub smart contract on the BASE Sepolia testnet.
+### Deployed Contract
 
-### Contract Prerequisites
+The DataHub contract has already been deployed to the BASE Sepolia testnet with the following details:
+
+- **Contract Address**: [0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6](https://sepolia.basescan.org/address/0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6)
+- **Group Manager**: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+- **Revocation Manager**: 0x4b42EE1d1AEe8d3cc691661aa3b25D98Dac2FE46
+
+New contributors do NOT need to deploy the contract again. Simply use this address in your `.env` file:
+
+```env
+CONTRACT_ADDRESS=0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6
+```
+
+### Contract Development
+
+The project uses Hardhat to compile and interact with the DataHub smart contract on the BASE Sepolia testnet.
+
+#### Contract Prerequisites
 
 - Node.js (v14+)
 - npm or yarn
 - A wallet with BASE Sepolia testnet ETH (get from [BASE Sepolia Faucet](https://www.coinbase.com/faucets/base-sepolia-faucet))
 
-### Deployment Steps
+#### Development Steps
 
 1. Install dependencies:
 
@@ -110,26 +111,7 @@ The project uses Hardhat to deploy and verify the DataHub smart contract on the 
    npm test
    ```
 
-4. Deploy to BASE Sepolia testnet:
-
-   ```bash
-   npm run deploy:baseSepolia
-   ```
-
-5. After successful deployment, update the `CONTRACT_ADDRESS` in your `.env` file with the deployed contract address.
-
 For more detailed instructions, see the [contracts/README.md](contracts/README.md) file.
-
-## Deployed Contract Information
-
-The DataHub contract has been deployed to the BASE Sepolia testnet with the following details:
-
-- **Contract Address**: [0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6](https://sepolia.basescan.org/address/0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6)
-- **Group Manager**: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-- **Revocation Manager**: 0x4b42EE1d1AEe8d3cc691661aa3b25D98Dac2FE46
-- **Deployment Transaction**: [View on Basescan](https://sepolia.basescan.org/tx/0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6)
-
-To interact with the contract, you can use the provided frontend or directly call the contract functions using ethers.js or web3.py.
 
 ## MCL Setup
 
@@ -164,7 +146,7 @@ If MCL is not set up, the script will guide you through the setup process. Alter
    source ~/.bashrc
    ```
 
-## IPFS Setup
+## IPFS Setup( tao lam docker, xai ipfs desktop thi tu xu nha)
 
 The application uses IPFS for storing encrypted medical records. You can run IPFS in a Docker container:
 
@@ -183,13 +165,21 @@ python test_ipfs.py
 ```
 
 ## Running the Application
+1.Run with Docker
 
-You can run the application using the provided run.py script:
+install docker and docker compose
+```bash
+docker-compose up --build
+```
+2.You can run the application using the provided run.py script:
 
 ```bash
-python run.py
+python -m uvicorn backend.api:app --host 0.0.0.0 --port 8000
+streamlit run app/main.py
 ```
-
+Frontend: http://localhost:8501
+Backend API: http://localhost:8000
+IPFS Gateway: http://localhost:8080
 This will start all the required services (IPFS, backend, and frontend). You can also run specific components:
 
 ```bash
@@ -209,16 +199,34 @@ You can also check if the backend components are working correctly:
 python check_backend.py
 ```
 
-### Using Docker Compose
+### Using Docker Compose (Recommended)
 
-The application can also be run using Docker Compose, which will automatically connect to your existing IPFS container:
+The application can be run using Docker Compose, which will set up all required services:
 
 ```bash
 # Build and start the services
 docker-compose up --build
 ```
 
-This will start the backend API and frontend web application, connecting to your existing IPFS container.
+This will start:
+1. The backend API server (FastAPI)
+2. The frontend web application (Streamlit)
+3. An IPFS node for storing encrypted records
+
+You can access the application at:
+- Frontend: http://localhost:8501
+- Backend API: http://localhost:8000
+- IPFS Gateway: http://localhost:8080
+
+To stop the application:
+```bash
+docker-compose down
+```
+
+To rebuild after making changes:
+```bash
+docker-compose up --build
+```
 
 ## pygroupsig Library
 

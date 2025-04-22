@@ -4,13 +4,32 @@ import time
 import hashlib
 import base64
 import random
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from fastapi import FastAPI, HTTPException, Depends, Body, Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import ipfshttpclient
 from web3 import Web3
 import uvicorn
 from dotenv import load_dotenv
+
+# Import auto_fill_template module
+try:
+    from backend.auto_fill_template import auto_fill_template
+except ImportError:
+    # Try relative import if the above fails
+    try:
+        from .auto_fill_template import auto_fill_template
+    except ImportError:
+        # Last resort, try direct import
+        try:
+            from auto_fill_template import auto_fill_template
+        except ImportError:
+            print("Warning: Could not import auto_fill_template module. Template auto-filling will be disabled.")
+            # Define a dummy function as fallback
+            def auto_fill_template(request_id, template):
+                print(f"Auto-fill template disabled: request_id={request_id}")
+                return None
 # Try to import Coinbase Cloud SDK, but make it optional
 try:
     from cdp_sdk import CoinbaseCloud
@@ -28,6 +47,22 @@ from backend.roles import Patient, Doctor, GroupManager
 from backend.groupsig_utils import sign_message, verify_signature, open_signature_group_manager, open_signature_revocation_manager, open_signature_full
 
 app = FastAPI(title="Healthcare Data Sharing API")
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Health check endpoint
+@app.get("/health")
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for Docker healthcheck"""
+    return {"status": "healthy", "timestamp": int(time.time())}
 
 # Load environment variables
 load_dotenv()
@@ -187,6 +222,309 @@ def clean_cid(cid):
     print(f"Cleaned CID: '{cid}' -> '{cleaned}'")
     return cleaned
 
+# Function to save a transaction to local storage
+def save_transaction(transaction):
+    """Save a transaction to the local storage."""
+    try:
+        # Create the transactions directory if it doesn't exist
+        os.makedirs("local_storage/transactions", exist_ok=True)
+
+        # Generate a unique ID for the transaction
+        transaction_id = f"{int(time.time())}_{random.randint(1000, 9999)}"
+
+        # Save the transaction to a file
+        file_path = f"local_storage/transactions/{transaction_id}.json"
+        with open(file_path, "w") as f:
+            json.dump(transaction, f)
+
+        print(f"Transaction saved: {file_path}")
+        return True
+    except Exception as e:
+        print(f"Error saving transaction: {str(e)}")
+        return False
+
+@app.get("/api/buyer/filled-templates")
+@app.get("/buyer/filled-templates")
+async def get_filled_templates(wallet_address: str):
+    """
+    Get filled templates for a buyer
+    """
+    try:
+        print(f"Getting filled templates for buyer {wallet_address}")
+
+        # For demo purposes, we'll look for purchase requests that have been filled by patients
+        # In a real implementation, we would filter requests based on the buyer's address
+
+        # Check if the local storage directory exists
+        if not os.path.exists("local_storage/purchases"):
+            return {"templates": []}
+
+        # Get all purchase files
+        purchase_files = os.listdir("local_storage/purchases")
+
+        # Filter for requests that have been filled by patients
+        templates = []
+        for file_name in purchase_files:
+            if not file_name.endswith(".json"):
+                continue
+
+            file_path = f"local_storage/purchases/{file_name}"
+
+            try:
+                with open(file_path, "r") as f:
+                    purchase_data = json.load(f)
+
+                # Check if this request has been filled by a patient and belongs to this buyer
+                if purchase_data.get("status") == "filled" and purchase_data.get("buyer") == wallet_address:
+                    # Check if the request has multiple templates
+                    if "templates" in purchase_data and purchase_data["templates"]:
+                        # Create a template object for each template in the request
+                        for template_info in purchase_data["templates"]:
+                            template = {
+                                "request_id": purchase_data.get("request_id"),
+                                "patient": purchase_data.get("patient_address", "Unknown"),
+                                "hospital": purchase_data.get("hospital", "Unknown"),
+                                "template_cid": template_info.get("template_cid"),
+                                "cert_cid": template_info.get("cert_cid"),
+                                "status": "filled",
+                                "timestamp": template_info.get("filled_at", purchase_data.get("filled_at", int(time.time()))),
+                                "template": purchase_data.get("template", {}),
+                                "verified": template_info.get("verified", False)
+                            }
+
+                            # Add to templates list
+                            templates.append(template)
+                    else:
+                        # Fallback for older format with a single template
+                        template = {
+                            "request_id": purchase_data.get("request_id"),
+                            "patient": purchase_data.get("patient_address", "Unknown"),
+                            "hospital": purchase_data.get("hospital", "Unknown"),
+                            "template_cid": purchase_data.get("template_cid"),
+                            "cert_cid": purchase_data.get("cert_cid"),
+                            "status": "filled",
+                            "timestamp": purchase_data.get("filled_at", int(time.time())),
+                            "template": purchase_data.get("template", {}),
+                            "verified": purchase_data.get("verified", False)
+                        }
+
+                        # Add to templates list
+                        templates.append(template)
+            except Exception as e:
+                print(f"Error processing file {file_name}: {str(e)}")
+
+        return {"templates": templates}
+    except Exception as e:
+        print(f"Error in get_filled_templates: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/template/{template_cid}")
+@app.get("/template/{template_cid}")
+async def get_template(template_cid: str, wallet_address: str, cert_cid: str = None):
+    """
+    Retrieve and decrypt a template for a buyer
+    """
+    try:
+        print(f"Retrieving template {template_cid} for buyer {wallet_address}")
+
+        # Clean the CIDs
+        clean_template_cid = clean_cid(template_cid)
+        clean_cert_cid = clean_cid(cert_cid) if cert_cid else None
+
+        # Check if the wallet address matches the Buyer address
+        if wallet_address == BUYER_ADDRESS:
+            print(f"Buyer {wallet_address} is retrieving template {clean_template_cid}")
+        else:
+            print(f"Warning: Non-buyer address {wallet_address} is attempting to retrieve a template")
+
+        # Get the CERT data if provided
+        cert_data = None
+        if clean_cert_cid:
+            try:
+                # First try IPFS
+                if check_ipfs_connection():
+                    try:
+                        # Try to retrieve from IPFS
+                        cert_bytes = ipfs_client.cat(clean_cert_cid)
+                        cert_data = json.loads(cert_bytes.decode())
+                        print(f"Retrieved CERT data from IPFS: {len(cert_bytes)} bytes")
+                    except Exception as ipfs_error:
+                        print(f"Error retrieving CERT from IPFS: {str(ipfs_error)}")
+                        # Try local storage as fallback
+                        try:
+                            with open(f"local_storage/{clean_cert_cid}", "rb") as f:
+                                cert_bytes = f.read()
+                            cert_data = json.loads(cert_bytes.decode())
+                            print(f"Retrieved CERT data from local storage: {len(cert_bytes)} bytes")
+                        except Exception as local_error:
+                            print(f"Error retrieving CERT from local storage: {str(local_error)}")
+                            raise HTTPException(status_code=404, detail=f"CERT not found in IPFS or local storage: {clean_cert_cid}")
+                else:
+                    # IPFS not connected, try local storage
+                    try:
+                        with open(f"local_storage/{clean_cert_cid}", "rb") as f:
+                            cert_bytes = f.read()
+                        cert_data = json.loads(cert_bytes.decode())
+                        print(f"Retrieved CERT data from local storage: {len(cert_bytes)} bytes")
+                    except Exception as local_error:
+                        print(f"Error retrieving CERT from local storage: {str(local_error)}")
+                        raise HTTPException(status_code=404, detail=f"CERT not found in local storage and IPFS is not available")
+            except Exception as e:
+                print(f"Error retrieving CERT data: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error retrieving CERT data: {str(e)}")
+
+        # Get the encrypted template data
+        encrypted_template = None
+        try:
+            # First try IPFS
+            if check_ipfs_connection():
+                try:
+                    # Try to retrieve from IPFS
+                    encrypted_template = ipfs_client.cat(clean_template_cid)
+                    print(f"Retrieved encrypted template from IPFS: {len(encrypted_template)} bytes")
+                except Exception as ipfs_error:
+                    print(f"Error retrieving encrypted template from IPFS: {str(ipfs_error)}")
+                    # Try local storage as fallback
+                    try:
+                        with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                            encrypted_template = f.read()
+                        print(f"Retrieved encrypted template from local storage: {len(encrypted_template)} bytes")
+                    except Exception as local_error:
+                        print(f"Error retrieving encrypted template from local storage: {str(local_error)}")
+                        raise HTTPException(status_code=404, detail=f"Encrypted template not found in IPFS or local storage: {clean_template_cid}")
+            else:
+                # IPFS not connected, try local storage
+                try:
+                    with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                        encrypted_template = f.read()
+                    print(f"Retrieved encrypted template from local storage: {len(encrypted_template)} bytes")
+                except Exception as local_error:
+                    print(f"Error retrieving encrypted template from local storage: {str(local_error)}")
+                    raise HTTPException(status_code=404, detail=f"Encrypted template not found in local storage and IPFS is not available")
+        except Exception as e:
+            print(f"Error retrieving encrypted template: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error retrieving encrypted template: {str(e)}")
+
+        # For demo purposes, we'll skip the actual decryption
+        # In a real implementation, we would:
+        # 1. Decrypt the encrypted_key with the buyer's private key
+        # 2. Use the decrypted key to decrypt the encrypted template
+
+        # Create a mock decrypted template for demo purposes
+        decrypted_template = {
+            "record": {
+                "patientID": "0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A",
+                "doctorID": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+                "date": "2023-06-15",
+                "category": "Cardiology",
+                "hospitalInfo": "General Hospital",
+                "demographics": {
+                    "age": 45,
+                    "gender": "Male"
+                },
+                "medical_data": {
+                    "diagnosis": "Hypertension",
+                    "treatment": "Prescribed medication and lifestyle changes"
+                },
+                "notes": "Patient responding well to treatment"
+            },
+            "merkle_root": cert_data.get("merkle_root", "unknown") if cert_data else "unknown",
+            "signature": cert_data.get("signature", "unknown") if cert_data else "unknown",
+            "timestamp": int(time.time())
+        }
+
+        return decrypted_template
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_template: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/revocation/request")
+@app.post("/revocation/request")
+async def request_revocation(
+    request_id: str = Body(...),
+    template_cid: str = Body(...),
+    signature: str = Body(...),
+    wallet_address: str = Body(...)
+):
+    """
+    Buyer requests revocation of a doctor's signature
+    """
+    try:
+        # Check if the wallet address matches the Buyer address
+        if wallet_address == BUYER_ADDRESS:
+            print(f"Buyer {wallet_address} is requesting revocation for template {template_cid} in request {request_id}")
+        else:
+            print(f"Warning: Non-buyer address {wallet_address} is attempting to request revocation")
+
+        # Check if the request exists
+        request_file = f"local_storage/purchases/{request_id}.json"
+        if not os.path.exists(request_file):
+            raise HTTPException(status_code=404, detail=f"Purchase request {request_id} not found")
+
+        # Load the request data
+        with open(request_file, "r") as f:
+            purchase_data = json.load(f)
+
+        # Check if the template CID matches
+        if purchase_data.get("template_cid") != template_cid:
+            raise HTTPException(status_code=400, detail=f"Template CID {template_cid} does not match the one in request {request_id}")
+
+        # Generate a transaction hash for demo purposes
+        tx_hash = f"0x{hashlib.sha256(f'{request_id}_{template_cid}_{signature}_{int(time.time())}'.encode()).hexdigest()}"
+
+        # Calculate a simulated gas fee
+        gas_fee = round(random.uniform(0.002, 0.005), 4)  # Revocation costs more gas
+
+        # Create transaction history entry for revocation request
+        revocation_transaction = {
+            "id": f"tx-{int(time.time())}",
+            "request_id": request_id,
+            "type": "Revocation Request",
+            "status": "Completed",
+            "timestamp": int(time.time()),
+            "tx_hash": tx_hash,
+            "gas_fee": gas_fee,
+            "buyer": wallet_address,
+            "template_cid": template_cid,
+            "signature": signature,
+            "details": {
+                "message": "Revocation request submitted to Group Manager and Revocation Manager",
+                "reason": "Verification failed"
+            }
+        }
+
+        # Save the transaction
+        save_transaction(revocation_transaction)
+
+        # Update the purchase data
+        purchase_data["revocation_requested"] = True
+        purchase_data["revocation_requested_at"] = int(time.time())
+        purchase_data["revocation_transaction"] = revocation_transaction
+
+        # Save the updated purchase data
+        with open(request_file, "w") as f:
+            json.dump(purchase_data, f)
+
+        # In a real implementation, this would call the smart contract to request revocation
+        # tx_hash = contract.functions.requestRevocation(signature).transact({'from': wallet_address})
+        # receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+
+        return {
+            "status": "success",
+            "message": "Revocation request submitted successfully",
+            "transaction_hash": tx_hash,
+            "gas_fee": gas_fee
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in request_revocation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Function to handle IPFS operations with fallback
 def store_on_ipfs(data):
     """Store data on IPFS with fallback to local storage
@@ -305,10 +643,13 @@ def decrypt_record(encrypted_data, key):
 # Models
 class RecordData(BaseModel):
     patientID: str
-    date: str
-    diagnosis: str
     doctorID: str
-    notes: str
+    date: str
+    category: Optional[str] = "General"
+    hospitalInfo: Optional[str] = "General Hospital"
+    demographics: Optional[Dict[str, Any]] = None
+    medical_data: Optional[Dict[str, Any]] = None
+    notes: Optional[str] = None
 
 class ShareRequest(BaseModel):
     record_cid: str
@@ -807,21 +1148,43 @@ async def share_record(record_cid: str = Body(None), doctor_address: str = Body(
 
 @app.post("/api/purchase/request")
 @app.post("/purchase/request")
-async def request_purchase(purchase_req: PurchaseRequest, wallet_address: str = Body(...)):
+async def request_purchase(purchase_req: Optional[PurchaseRequest] = None, wallet_address: str = Body(...), template_hash: Optional[str] = Body(None), amount: Optional[float] = Body(None), template: Optional[dict] = Body(None)):
     """
     Buyer requests to purchase data (on-chain)
     """
     try:
+        # Handle different ways of receiving parameters
+        final_template_hash = None
+        final_amount = None
+        final_template = None
+
+        # If purchase_req is provided, use it
+        if purchase_req is not None:
+            final_template_hash = purchase_req.template_hash
+            final_amount = purchase_req.amount
+            final_template = purchase_req.template
+        else:
+            # Otherwise use individual parameters
+            final_template_hash = template_hash
+            final_amount = amount
+            final_template = template
+
+        # Validate required parameters
+        if final_template_hash is None:
+            raise HTTPException(status_code=400, detail="Template hash is required")
+        if final_amount is None:
+            final_amount = 0.1  # Default amount
+
         # Check if the wallet address matches the Buyer address
         if wallet_address == BUYER_ADDRESS:
-            print(f"Buyer {wallet_address} is requesting a purchase for template hash {purchase_req.template_hash} with amount {purchase_req.amount} ETH")
+            print(f"Buyer {wallet_address} is requesting a purchase for template hash {final_template_hash} with amount {final_amount} ETH")
         else:
             print(f"Warning: Non-buyer address {wallet_address} is attempting to request a purchase")
 
         # This would call the smart contract in production
-        # tx_hash = contract.functions.request(purchase_req.template_hash).transact({
+        # tx_hash = contract.functions.request(final_template_hash).transact({
         #     'from': wallet_address,
-        #     'value': w3.toWei(purchase_req.amount, 'ether')
+        #     'value': w3.toWei(final_amount, 'ether')
         # })
         # receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
 
@@ -839,8 +1202,8 @@ async def request_purchase(purchase_req: PurchaseRequest, wallet_address: str = 
         # In a real implementation, this would be stored on the blockchain
         purchase_data = {
             "request_id": request_id,
-            "template_hash": purchase_req.template_hash,
-            "amount": purchase_req.amount,
+            "template_hash": final_template_hash,
+            "amount": final_amount,
             "buyer": wallet_address,
             "timestamp": int(time.time()),
             "status": "pending",
@@ -849,18 +1212,18 @@ async def request_purchase(purchase_req: PurchaseRequest, wallet_address: str = 
         }
 
         # If a template was provided, store it as well
-        if purchase_req.template:
-            purchase_data["template"] = purchase_req.template
-            print(f"Template provided: {purchase_req.template}")
+        if final_template:
+            purchase_data["template"] = final_template
+            print(f"Template provided: {final_template}")
 
             # Extract fields for transaction history
             fields = []
-            if purchase_req.template.get("demographics"):
-                for field, included in purchase_req.template["demographics"].items():
+            if final_template.get("demographics"):
+                for field, included in final_template["demographics"].items():
                     if included:
                         fields.append(field.capitalize())
-            if purchase_req.template.get("medical_data"):
-                for field, included in purchase_req.template["medical_data"].items():
+            if final_template.get("medical_data"):
+                for field, included in final_template["medical_data"].items():
                     if included:
                         fields.append(field.capitalize())
 
@@ -873,13 +1236,13 @@ async def request_purchase(purchase_req: PurchaseRequest, wallet_address: str = 
                 "timestamp": int(time.time()),
                 "tx_hash": tx_hash,
                 "gas_fee": gas_fee,
-                "amount": purchase_req.amount,
-                "template_hash": purchase_req.template_hash,
+                "amount": final_amount,
+                "template_hash": final_template_hash,
                 "details": {
-                    "category": purchase_req.template.get("category", "General"),
+                    "category": final_template.get("category", "General"),
                     "fields": fields,
-                    "time_period": purchase_req.template.get("time_period", "1 year"),
-                    "min_records": purchase_req.template.get("min_records", 10)
+                    "time_period": final_template.get("time_period", "1 year"),
+                    "min_records": final_template.get("min_records", 10)
                 }
             }
 
@@ -905,20 +1268,19 @@ async def request_purchase(purchase_req: PurchaseRequest, wallet_address: str = 
 @app.post("/purchase/reply")
 async def reply_to_purchase(
     request_id: str = Body(...),
-    template_cid: str = Body(...),
-    wallet_address: str = Body(...)
+    wallet_address: str = Body(...),
+    records_count: Optional[int] = Body(None),
+    patients_count: Optional[int] = Body(None),
+    price_per_record: Optional[float] = Body(None),
+    template_cid: Optional[str] = Body(None)  # Keep for backward compatibility
 ):
     """
-    Hospital replies to a purchase request
+    Hospital replies to a purchase request confirming data availability
     """
     try:
-        # Clean the template CID
-        clean_template_cid = clean_cid(template_cid)
-        print(f"Using cleaned template CID: {clean_template_cid}")
-
         # Check if the wallet address matches the Hospital address
         if wallet_address == HOSPITAL_ADDRESS:
-            print(f"Hospital {wallet_address} is replying to purchase request {request_id} with template {clean_template_cid}")
+            print(f"Hospital {wallet_address} is confirming availability for request {request_id}")
         else:
             print(f"Warning: Non-hospital address {wallet_address} is attempting to reply to a purchase request")
 
@@ -931,8 +1293,16 @@ async def reply_to_purchase(
         with open(request_file, "r") as f:
             purchase_data = json.load(f)
 
+        # Set default values if not provided
+        if records_count is None:
+            records_count = random.randint(10, 30)  # Default to random value for demo
+        if patients_count is None:
+            patients_count = random.randint(2, 5)   # Default to random value for demo
+        if price_per_record is None:
+            price_per_record = 0.01                # Default price per record
+
         # Generate a transaction hash for demo purposes
-        tx_hash = f"0x{hashlib.sha256(f'{request_id}_{clean_template_cid}_{int(time.time())}'.encode()).hexdigest()}"
+        tx_hash = f"0x{hashlib.sha256(f'{request_id}_{records_count}_{patients_count}_{int(time.time())}'.encode()).hexdigest()}"
 
         # Calculate a simulated gas fee
         gas_fee = round(random.uniform(0.001, 0.003), 4)
@@ -946,34 +1316,93 @@ async def reply_to_purchase(
             "timestamp": int(time.time()),
             "tx_hash": tx_hash,
             "gas_fee": gas_fee,
-            "template_cid": clean_template_cid,
             "hospital": wallet_address,
             "details": {
-                "records_count": random.randint(10, 30),  # Simulated count for demo
-                "patients_count": random.randint(2, 5)    # Simulated count for demo
+                "records_count": records_count,
+                "patients_count": patients_count,
+                "price_per_record": price_per_record,
+                "total_value": round(records_count * price_per_record, 4)
             }
         }
 
-        # Update the request with the template CID and transaction
-        purchase_data["template_cid"] = clean_template_cid
+        # Update the request with the confirmation data and transaction
         purchase_data["status"] = "replied"
         purchase_data["replied_at"] = int(time.time())
         purchase_data["hospital"] = wallet_address
+        purchase_data["records_count"] = records_count
+        purchase_data["patients_count"] = patients_count
+        purchase_data["price_per_record"] = price_per_record
         purchase_data["reply_transaction"] = transaction
+
+        # For backward compatibility, keep template_cid if provided
+        if template_cid:
+            clean_template_cid = clean_cid(template_cid)
+            purchase_data["template_cid"] = clean_template_cid
+            transaction["template_cid"] = clean_template_cid
+        else:
+            # Auto-fill template for Patient 1
+            print(f"Auto-filling template for Patient 1 for request {request_id}")
+
+            # Get the template from the purchase data
+            template = purchase_data.get("template")
+            if template:
+                # Get the buyer's address
+                buyer_address = purchase_data.get("buyer")
+                print(f"Buyer address: {buyer_address}")
+
+                # For demo purposes, generate a buyer public key
+                # In a real implementation, we would get this from a key server
+                buyer_public_key = None
+                try:
+                    # Generate a mock RSA key for the buyer
+                    buyer_private_key, buyer_public_key = generate_rsa_key_pair()
+                    print(f"Generated buyer public key for {buyer_address}")
+                except Exception as e:
+                    print(f"Error generating buyer key pair: {str(e)}")
+
+                # Call auto_fill_template to fill the template
+                result = auto_fill_template(request_id, template, buyer_public_key)
+                if result:
+                    print(f"Template auto-filled successfully")
+
+                    # Store the result in the purchase data
+                    purchase_data["template_cid"] = result["template_cid"]
+                    purchase_data["cert_cid"] = result["cert_cid"]
+                    purchase_data["merkle_root"] = result["merkle_root"]
+                    purchase_data["signature"] = result["signature"]
+                    purchase_data["encrypted_key"] = result["encrypted_key"]
+
+                    # Update the transaction
+                    transaction["template_cid"] = result["template_cid"]
+                    transaction["cert_cid"] = result["cert_cid"]
+                    transaction["merkle_root"] = result["merkle_root"]
+
+                    # Add details to the transaction
+                    transaction["details"]["records_count"] = 1  # One record per template
+                    transaction["details"]["patients_count"] = 1  # Always Patient 1
+                    transaction["details"]["price_per_record"] = purchase_data.get("amount", 0.1)
+                    transaction["details"]["total_value"] = purchase_data.get("amount", 0.1)
+                else:
+                    print(f"Failed to auto-fill template for request {request_id}")
+            else:
+                print(f"No template found in purchase data for request {request_id}")
 
         # Save the updated request data
         with open(request_file, "w") as f:
             json.dump(purchase_data, f)
 
         # This would call the smart contract in production
-        # tx_hash = contract.functions.reply(request_id, template_cid).transact({'from': wallet_address})
+        # tx_hash = contract.functions.reply(request_id, records_count, patients_count).transact({'from': wallet_address})
         # receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
 
         return {
             "status": "success",
             "transaction_hash": tx_hash,
             "request_id": request_id,
-            "template_cid": clean_template_cid,
+            "records_count": records_count,
+            "patients_count": patients_count,
+            "price_per_record": price_per_record,
+            "total_value": round(records_count * price_per_record, 4),
             "gas_fee": gas_fee,
             "transaction": transaction
         }
@@ -1350,28 +1779,21 @@ async def access_shared_record(metadata_cid: str = Body(...), wallet_address: st
 
 @app.post("/api/purchase/verify")
 @app.post("/purchase/verify")
-async def verify_purchase(request_id: str = Body(...), template_cid: str = Body(...), wallet_address: str = Body(...)):
+async def verify_purchase(request_id: str = Body(...), wallet_address: str = Body(...), template_cid: Optional[str] = Body(None)):
     """
     Verify a purchase off-chain
     """
     try:
-        # Clean the template CID
-        clean_template_cid = clean_cid(template_cid)
-        print(f"Using cleaned template CID: {clean_template_cid}")
-
         # In a real implementation, this would:
-        # 1. Retrieve the combined template package from IPFS
-        # 2. Verify the hospital's signature
-        # 3. For each patient template:
-        #    - Retrieve the template package
-        #    - Decrypt the template key
-        #    - Decrypt the template data
+        # 1. Verify the hospital's confirmation data
+        # 2. Verify the records count and patients count
+        # 3. For each patient record:
         #    - Verify the Merkle proofs
         #    - Verify the group signature
 
         # Check if the wallet address matches the Buyer address
         if wallet_address == BUYER_ADDRESS:
-            print(f"Buyer {wallet_address} is verifying purchase {request_id} with template CID {clean_template_cid}")
+            print(f"Buyer {wallet_address} is verifying purchase {request_id}")
         else:
             print(f"Warning: Non-buyer address {wallet_address} is attempting to verify a purchase")
 
@@ -1384,58 +1806,82 @@ async def verify_purchase(request_id: str = Body(...), template_cid: str = Body(
         with open(request_file, "r") as f:
             purchase_data = json.load(f)
 
-        # Try to retrieve the template from IPFS to verify it exists
+        # Check if the request has been replied to
+        if purchase_data.get("status") != "replied":
+            raise HTTPException(status_code=400, detail=f"Purchase request {request_id} has not been replied to yet")
+
+        # For backward compatibility, check template_cid if provided
         template_exists = False
         template_data = None
+        template_size = 0
 
-        try:
-            if check_ipfs_connection():
-                try:
-                    # Try to retrieve from IPFS
-                    template_data = ipfs_client.cat(clean_template_cid)
-                    print(f"Retrieved template data from IPFS: {len(template_data)} bytes")
-                    template_exists = True
-                except Exception as ipfs_error:
-                    print(f"Error retrieving template from IPFS: {str(ipfs_error)}")
-                    # Try local storage as fallback
+        if template_cid:
+            clean_template_cid = clean_cid(template_cid)
+            print(f"Using cleaned template CID: {clean_template_cid}")
+
+            try:
+                if check_ipfs_connection():
+                    try:
+                        # Try to retrieve from IPFS
+                        template_data = ipfs_client.cat(clean_template_cid)
+                        print(f"Retrieved template data from IPFS: {len(template_data)} bytes")
+                        template_exists = True
+                        template_size = len(template_data)
+                    except Exception as ipfs_error:
+                        print(f"Error retrieving template from IPFS: {str(ipfs_error)}")
+                        # Try local storage as fallback
+                        try:
+                            with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                                template_data = f.read()
+                            print(f"Retrieved template data from local storage: {len(template_data)} bytes")
+                            template_exists = True
+                            template_size = len(template_data)
+                        except FileNotFoundError:
+                            print(f"Template not found in IPFS or local storage: {clean_template_cid}")
+                else:
+                    # IPFS not connected, try local storage
                     try:
                         with open(f"local_storage/{clean_template_cid}", "rb") as f:
                             template_data = f.read()
                         print(f"Retrieved template data from local storage: {len(template_data)} bytes")
                         template_exists = True
+                        template_size = len(template_data)
                     except FileNotFoundError:
-                        print(f"Template not found in IPFS or local storage: {clean_template_cid}")
-            else:
-                # IPFS not connected, try local storage
-                try:
-                    with open(f"local_storage/{clean_template_cid}", "rb") as f:
-                        template_data = f.read()
-                    print(f"Retrieved template data from local storage: {len(template_data)} bytes")
-                    template_exists = True
-                except FileNotFoundError:
-                    print(f"Template not found in local storage and IPFS is not available")
-        except Exception as e:
-            print(f"Error checking template existence: {str(e)}")
+                        print(f"Template not found in local storage and IPFS is not available")
+            except Exception as e:
+                print(f"Error checking template existence: {str(e)}")
 
         # For demo purposes, we'll simulate the verification process
-        # In a real implementation, we would verify the template data
-        verification_passed = template_exists
+        # In a real implementation, we would verify the hospital's confirmation data
+        verification_passed = True  # Assume verification passes if the request has been replied to
 
         if not verification_passed:
-            print(f"Verification failed: Template does not exist or could not be retrieved")
+            print(f"Verification failed: Hospital confirmation could not be verified")
             return {
                 "status": "error",
                 "verified": False,
-                "message": "Template does not exist or could not be retrieved"
+                "message": "Hospital confirmation could not be verified"
             }
 
-        # Simulate list of recipients (hospital + patients)
-        # In a real implementation, these would be extracted from the template data
-        recipients = [
-            HOSPITAL_ADDRESS,  # Hospital
-            PATIENT_ADDRESS,   # Patient 1
-            "0x3456789012345678901234567890123456789012"   # Patient 2 (example)
-        ]
+        # Get hospital address from the purchase data
+        hospital_address = purchase_data.get("hospital", HOSPITAL_ADDRESS)
+
+        # Get records count and patients count from the purchase data
+        records_count = purchase_data.get("records_count", 0)
+        patients_count = purchase_data.get("patients_count", 0)
+
+        # Generate a list of patient addresses (simulated for demo)
+        # In a real implementation, these would be extracted from the actual data
+        patient_addresses = [PATIENT_ADDRESS]  # Start with the default patient
+
+        # Add more patient addresses if needed
+        for i in range(1, patients_count):
+            # Use deterministic addresses for demo purposes
+            patient_address = f"0x{hashlib.sha256(f'patient_{i}_{request_id}'.encode()).hexdigest()[:40]}"
+            patient_addresses.append(patient_address)
+
+        # Combine hospital and patient addresses for recipients list
+        recipients = [hospital_address] + patient_addresses[:patients_count]
 
         # Create transaction history entry for verification
         verification_transaction = {
@@ -1449,7 +1895,10 @@ async def verify_purchase(request_id: str = Body(...), template_cid: str = Body(
                 "merkle_proofs": "Valid",
                 "signatures": "Valid",
                 "recipients": recipients,
-                "template_size": len(template_data) if template_data else 0
+                "records_count": records_count,
+                "patients_count": patients_count,
+                "price_per_record": purchase_data.get("price_per_record", 0.01),
+                "total_value": purchase_data.get("price_per_record", 0.01) * records_count
             }
         }
 
@@ -1470,7 +1919,8 @@ async def verify_purchase(request_id: str = Body(...), template_cid: str = Body(
             "status": "success",
             "verified": verification_passed,
             "recipients": recipients,
-            "template_size": len(template_data) if template_data else 0,
+            "records_count": records_count,
+            "patients_count": patients_count,
             "transaction": verification_transaction
         }
     except Exception as e:
@@ -1707,6 +2157,580 @@ async def get_transactions(wallet_address: str):
         return {"transactions": transactions}
     except Exception as e:
         print(f"Error in get_transactions: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/template/{template_cid}")
+@app.get("/template/{template_cid}")
+async def get_template(template_cid: str, wallet_address: str = None):
+    """
+    Retrieve template data from IPFS or local storage
+    """
+    try:
+        # Clean the template CID
+        clean_template_cid = clean_cid(template_cid)
+        print(f"Getting template data for CID: {clean_template_cid}")
+
+        # Check if the wallet address is provided
+        if wallet_address:
+            print(f"Request from wallet address: {wallet_address}")
+
+        # Try to retrieve the template data
+        template_data = None
+
+        # First try IPFS
+        if check_ipfs_connection():
+            try:
+                # Try to retrieve from IPFS
+                template_bytes = ipfs_client.cat(clean_template_cid)
+                template_data = json.loads(template_bytes.decode())
+                print(f"Retrieved template data from IPFS: {len(template_bytes)} bytes")
+            except Exception as ipfs_error:
+                print(f"Error retrieving from IPFS: {str(ipfs_error)}")
+                # Try local storage as fallback
+                try:
+                    with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                        template_bytes = f.read()
+                    template_data = json.loads(template_bytes.decode())
+                    print(f"Retrieved template data from local storage: {len(template_bytes)} bytes")
+                except Exception as local_error:
+                    print(f"Error retrieving from local storage: {str(local_error)}")
+                    raise HTTPException(status_code=404, detail=f"Template not found in IPFS or local storage: {clean_template_cid}")
+        else:
+            # IPFS not connected, try local storage
+            try:
+                with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                    template_bytes = f.read()
+                template_data = json.loads(template_bytes.decode())
+                print(f"Retrieved template data from local storage: {len(template_bytes)} bytes")
+            except Exception as local_error:
+                print(f"Error retrieving from local storage: {str(local_error)}")
+                raise HTTPException(status_code=404, detail=f"Template not found in local storage and IPFS is not available")
+
+        # Return the template data
+        return template_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_template: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/purchase/verify")
+@app.post("/purchase/verify")
+async def verify_purchase(request_id: str = Body(...), wallet_address: str = Body(...), template_cid: str = Body(...)):
+    """
+    Verify a purchase template
+    """
+    try:
+        print(f"Verifying purchase template for request {request_id}")
+
+        # Check if the wallet address is provided
+        if wallet_address:
+            print(f"Request from wallet address: {wallet_address}")
+
+        # Get the template data
+        clean_template_cid = clean_cid(template_cid)
+        template_data = None
+
+        # Try to retrieve the template data
+        try:
+            # First try IPFS
+            if check_ipfs_connection():
+                try:
+                    # Try to retrieve from IPFS
+                    template_bytes = ipfs_client.cat(clean_template_cid)
+                    template_data = json.loads(template_bytes.decode())
+                    print(f"Retrieved template data from IPFS: {len(template_bytes)} bytes")
+                except Exception as ipfs_error:
+                    print(f"Error retrieving from IPFS: {str(ipfs_error)}")
+                    # Try local storage as fallback
+                    try:
+                        with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                            template_bytes = f.read()
+                        template_data = json.loads(template_bytes.decode())
+                        print(f"Retrieved template data from local storage: {len(template_bytes)} bytes")
+                    except Exception as local_error:
+                        print(f"Error retrieving from local storage: {str(local_error)}")
+                        raise HTTPException(status_code=404, detail=f"Template not found in IPFS or local storage: {clean_template_cid}")
+            else:
+                # IPFS not connected, try local storage
+                try:
+                    with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                        template_bytes = f.read()
+                    template_data = json.loads(template_bytes.decode())
+                    print(f"Retrieved template data from local storage: {len(template_bytes)} bytes")
+                except Exception as local_error:
+                    print(f"Error retrieving from local storage: {str(local_error)}")
+                    raise HTTPException(status_code=404, detail=f"Template not found in local storage and IPFS is not available")
+        except Exception as e:
+            print(f"Error retrieving template data: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error retrieving template data: {str(e)}")
+
+        # Verify the template data
+        if not template_data:
+            raise HTTPException(status_code=400, detail="Template data is empty")
+
+        # Check if the template has records
+        if "records" not in template_data or not template_data["records"]:
+            raise HTTPException(status_code=400, detail="Template has no records")
+
+        # Check if the template meets the minimum records requirement
+        min_records = template_data.get("template", {}).get("min_records", 1)
+        if len(template_data["records"]) < min_records:
+            raise HTTPException(status_code=400, detail=f"Template does not meet minimum records requirement: {len(template_data['records'])}/{min_records}")
+
+        # Get the patient address from the template
+        patient_address = template_data.get("patient_address")
+
+        # For demo purposes, always verify successfully
+        # In a real implementation, we would verify signatures, Merkle proofs, etc.
+
+        # Return the verification result
+        return {
+            "verified": True,
+            "message": "Template verified successfully",
+            "records_count": len(template_data["records"]),
+            "patients_count": 1,  # For demo purposes, always 1 patient
+            "recipients": [patient_address] if patient_address else ["0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A"]  # Default to Patient 1 if not specified
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in verify_purchase: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/purchase/verify")
+@app.post("/purchase/verify")
+async def verify_purchase(request_id: str = Body(...), wallet_address: str = Body(...), template_cid: str = Body(...)):
+    """
+    Verify a purchase template and CERT
+    """
+    try:
+        print(f"Verifying purchase template for request {request_id}")
+
+        # Check if the wallet address is provided
+        if wallet_address:
+            print(f"Request from wallet address: {wallet_address}")
+
+        # Check if the request exists
+        request_file = f"local_storage/purchases/{request_id}.json"
+        if not os.path.exists(request_file):
+            raise HTTPException(status_code=404, detail=f"Purchase request {request_id} not found")
+
+        # Load the request data
+        with open(request_file, "r") as f:
+            purchase_data = json.load(f)
+
+        # Get the CERT CID from the purchase data
+        cert_cid = purchase_data.get("cert_cid")
+        if not cert_cid:
+            raise HTTPException(status_code=400, detail=f"Purchase request {request_id} does not have a CERT")
+
+        # Get the template CID from the purchase data
+        stored_template_cid = purchase_data.get("template_cid")
+        if not stored_template_cid:
+            raise HTTPException(status_code=400, detail=f"Purchase request {request_id} does not have a template CID")
+
+        # Verify that the provided template CID matches the stored one
+        clean_template_cid = clean_cid(template_cid)
+        clean_stored_template_cid = clean_cid(stored_template_cid)
+        if clean_template_cid != clean_stored_template_cid:
+            raise HTTPException(status_code=400, detail=f"Provided template CID {clean_template_cid} does not match stored template CID {clean_stored_template_cid}")
+
+        # Get the CERT data
+        cert_data = None
+        try:
+            # First try IPFS
+            if check_ipfs_connection():
+                try:
+                    # Try to retrieve from IPFS
+                    cert_bytes = ipfs_client.cat(cert_cid)
+                    cert_data = json.loads(cert_bytes.decode())
+                    print(f"Retrieved CERT data from IPFS: {len(cert_bytes)} bytes")
+                except Exception as ipfs_error:
+                    print(f"Error retrieving CERT from IPFS: {str(ipfs_error)}")
+                    # Try local storage as fallback
+                    try:
+                        with open(f"local_storage/{cert_cid}", "rb") as f:
+                            cert_bytes = f.read()
+                        cert_data = json.loads(cert_bytes.decode())
+                        print(f"Retrieved CERT data from local storage: {len(cert_bytes)} bytes")
+                    except Exception as local_error:
+                        print(f"Error retrieving CERT from local storage: {str(local_error)}")
+                        raise HTTPException(status_code=404, detail=f"CERT not found in IPFS or local storage: {cert_cid}")
+            else:
+                # IPFS not connected, try local storage
+                try:
+                    with open(f"local_storage/{cert_cid}", "rb") as f:
+                        cert_bytes = f.read()
+                    cert_data = json.loads(cert_bytes.decode())
+                    print(f"Retrieved CERT data from local storage: {len(cert_bytes)} bytes")
+                except Exception as local_error:
+                    print(f"Error retrieving CERT from local storage: {str(local_error)}")
+                    raise HTTPException(status_code=404, detail=f"CERT not found in local storage and IPFS is not available")
+        except Exception as e:
+            print(f"Error retrieving CERT data: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error retrieving CERT data: {str(e)}")
+
+        # Verify the CERT data
+        if not cert_data:
+            raise HTTPException(status_code=400, detail="CERT data is empty")
+
+        # Check if the CERT has the required fields
+        if "merkle_root" not in cert_data or "signature" not in cert_data or "encrypted_key" not in cert_data:
+            raise HTTPException(status_code=400, detail="CERT is missing required fields")
+
+        # Get the encrypted template data
+        encrypted_template = None
+        try:
+            # First try IPFS
+            if check_ipfs_connection():
+                try:
+                    # Try to retrieve from IPFS
+                    encrypted_template = ipfs_client.cat(clean_template_cid)
+                    print(f"Retrieved encrypted template from IPFS: {len(encrypted_template)} bytes")
+                except Exception as ipfs_error:
+                    print(f"Error retrieving encrypted template from IPFS: {str(ipfs_error)}")
+                    # Try local storage as fallback
+                    try:
+                        with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                            encrypted_template = f.read()
+                        print(f"Retrieved encrypted template from local storage: {len(encrypted_template)} bytes")
+                    except Exception as local_error:
+                        print(f"Error retrieving encrypted template from local storage: {str(local_error)}")
+                        raise HTTPException(status_code=404, detail=f"Encrypted template not found in IPFS or local storage: {clean_template_cid}")
+            else:
+                # IPFS not connected, try local storage
+                try:
+                    with open(f"local_storage/{clean_template_cid}", "rb") as f:
+                        encrypted_template = f.read()
+                    print(f"Retrieved encrypted template from local storage: {len(encrypted_template)} bytes")
+                except Exception as local_error:
+                    print(f"Error retrieving encrypted template from local storage: {str(local_error)}")
+                    raise HTTPException(status_code=404, detail=f"Encrypted template not found in local storage and IPFS is not available")
+        except Exception as e:
+            print(f"Error retrieving encrypted template: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error retrieving encrypted template: {str(e)}")
+
+        # For demo purposes, we'll skip the actual decryption and verification
+        # In a real implementation, we would:
+        # 1. Decrypt the encrypted_key with the buyer's private key
+        # 2. Use the decrypted key to decrypt the encrypted template
+        # 3. Verify the Merkle root and signature in the decrypted template
+
+        # Get the patient address from the purchase data
+        patient_address = purchase_data.get("patient_address", "0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A")  # Default to Patient 1
+
+        # Create a verification transaction
+        verification_transaction = {
+            "type": "Buyer Verify",
+            "request_id": request_id,
+            "buyer": wallet_address,
+            "template_cid": clean_template_cid,
+            "cert_cid": cert_cid,
+            "timestamp": int(time.time()),
+            "details": {
+                "message": "Template verified successfully",
+                "records_count": 1,  # One record per template in our new workflow
+                "patients_count": 1  # Always Patient 1
+            }
+        }
+
+        # Save the verification transaction
+        save_transaction(verification_transaction)
+
+        # Update the purchase data
+        purchase_data["verification_transaction"] = verification_transaction
+
+        # Update verification status for the specific template
+        if "templates" in purchase_data:
+            for template in purchase_data["templates"]:
+                if template.get("template_cid") == clean_template_cid:
+                    template["verified"] = True
+                    template["verified_at"] = int(time.time())
+                    break
+
+        # For backward compatibility, also update the top-level verification status
+        purchase_data["verified"] = True
+        purchase_data["verified_at"] = int(time.time())
+
+        # Save the updated purchase data
+        with open(request_file, "w") as f:
+            json.dump(purchase_data, f)
+
+        # Return the verification result
+        return {
+            "verified": True,
+            "message": "Template verified successfully",
+            "records_count": 1,  # One record per template in our new workflow
+            "patients_count": 1,  # Always Patient 1
+            "recipients": [patient_address]  # Patient 1 is the recipient
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in verify_purchase: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/patient/requests")
+@app.get("/patient/requests")
+async def get_patient_requests(wallet_address: str):
+    """
+    Get data requests for a patient
+    """
+    try:
+        print(f"Getting data requests for patient {wallet_address}")
+
+        # For demo purposes, we'll look for purchase requests that have been replied to by the hospital
+        # In a real implementation, we would filter requests based on the patient's data
+
+        # Check if the local storage directory exists
+        if not os.path.exists("local_storage/purchases"):
+            return {"requests": []}
+
+        # Get all purchase files
+        purchase_files = os.listdir("local_storage/purchases")
+
+        # Filter for requests that have been replied to by the hospital
+        requests = []
+        for file_name in purchase_files:
+            if not file_name.endswith(".json"):
+                continue
+
+            file_path = f"local_storage/purchases/{file_name}"
+
+            try:
+                with open(file_path, "r") as f:
+                    purchase_data = json.load(f)
+
+                # Check if this request has been replied to by the hospital
+                if purchase_data.get("status") == "replied":
+                    # Create a request object for the patient
+                    request = {
+                        "request_id": purchase_data.get("request_id"),
+                        "buyer": purchase_data.get("buyer", "Unknown"),
+                        "hospital": purchase_data.get("hospital", "Unknown"),
+                        "template": purchase_data.get("template", {}),
+                        "status": "pending",  # For the patient, it's a new request
+                        "timestamp": purchase_data.get("timestamp", int(time.time())),
+                        "amount": purchase_data.get("amount", 0.1)
+                    }
+
+                    # Add to requests list
+                    requests.append(request)
+            except Exception as e:
+                print(f"Error processing file {file_name}: {str(e)}")
+
+        return {"requests": requests}
+    except Exception as e:
+        print(f"Error in get_patient_requests: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/patient/fill-template")
+@app.post("/patient/fill-template")
+async def fill_template(request_id: str = Body(...), wallet_address: str = Body(...)):
+    """
+    Fill a template for a patient
+    """
+    try:
+        print(f"Filling template for patient {wallet_address}, request {request_id}")
+
+        # Check if the request exists
+        request_file = f"local_storage/purchases/{request_id}.json"
+        if not os.path.exists(request_file):
+            raise HTTPException(status_code=404, detail=f"Purchase request {request_id} not found")
+
+        # Load the request data
+        with open(request_file, "r") as f:
+            purchase_data = json.load(f)
+
+        # Check if the request has been replied to by the hospital
+        if purchase_data.get("status") != "replied":
+            raise HTTPException(status_code=400, detail=f"Purchase request {request_id} has not been replied to by the hospital yet")
+
+        # Get the template from the purchase data
+        template = purchase_data.get("template")
+        if not template:
+            raise HTTPException(status_code=400, detail=f"Purchase request {request_id} does not have a template")
+
+        # Get the buyer's address
+        buyer_address = purchase_data.get("buyer")
+        if not buyer_address:
+            raise HTTPException(status_code=400, detail=f"Purchase request {request_id} does not have a buyer address")
+
+        # For demo purposes, generate a buyer public key
+        # In a real implementation, we would get this from a key server
+        buyer_public_key = None
+        try:
+            # Generate a mock RSA key for the buyer
+            buyer_private_key, buyer_public_key = generate_rsa_key_pair()
+            print(f"Generated buyer public key for {buyer_address}")
+        except Exception as e:
+            print(f"Error generating buyer key pair: {str(e)}")
+
+        # Call auto_fill_template to fill the template
+        try:
+            from auto_fill_template import auto_fill_template
+            result = auto_fill_template(request_id, template, buyer_public_key)
+            if not result:
+                raise HTTPException(status_code=500, detail=f"Failed to auto-fill template for request {request_id}")
+        except ImportError:
+            # Fallback if auto_fill_template is not available
+            print("Warning: auto_fill_template module not available, using mock data")
+            # Create mock result
+            result = {
+                "template_cid": f"template_{request_id}_{int(time.time())}",
+                "cert_cid": f"cert_{request_id}_{int(time.time())}",
+                "merkle_root": hashlib.sha256(f"{request_id}_{int(time.time())}".encode()).hexdigest(),
+                "signature": hashlib.sha256(f"sig_{request_id}_{int(time.time())}".encode()).hexdigest(),
+                "encrypted_key": f"key_{request_id}_{int(time.time())}",
+                "patient_address": wallet_address
+            }
+
+        # Update the purchase data
+        purchase_data["status"] = "filled"
+        purchase_data["filled_at"] = int(time.time())
+        purchase_data["patient_address"] = wallet_address
+
+        # Store template information in a list
+        if "templates" not in purchase_data:
+            purchase_data["templates"] = []
+
+        template_info = {
+            "template_cid": result["template_cid"],
+            "cert_cid": result["cert_cid"],
+            "merkle_root": result["merkle_root"],
+            "signature": result["signature"],
+            "encrypted_key": result["encrypted_key"],
+            "filled_at": int(time.time())
+        }
+
+        purchase_data["templates"].append(template_info)
+
+        # For backward compatibility, also store the latest template info at the top level
+        purchase_data["template_cid"] = result["template_cid"]
+        purchase_data["cert_cid"] = result["cert_cid"]
+        purchase_data["merkle_root"] = result["merkle_root"]
+        purchase_data["signature"] = result["signature"]
+        purchase_data["encrypted_key"] = result["encrypted_key"]
+
+        # Update templates count
+        purchase_data["templates_count"] = len(purchase_data["templates"])
+
+        # Create a transaction record
+        transaction = {
+            "type": "Patient Fill",
+            "request_id": request_id,
+            "patient": wallet_address,
+            "buyer": buyer_address,
+            "template_cid": result["template_cid"],
+            "cert_cid": result["cert_cid"],
+            "timestamp": int(time.time()),
+            "details": {
+                "message": "Template filled by patient"
+            }
+        }
+
+        # Save the transaction
+        save_transaction(transaction)
+
+        # Save the updated purchase data
+        with open(request_file, "w") as f:
+            json.dump(purchase_data, f)
+
+        # Return the result
+        return {
+            "success": True,
+            "message": "Template filled successfully",
+            "template_cid": result["template_cid"],
+            "cert_cid": result["cert_cid"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in fill_template: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/purchase/finalize")
+@app.post("/purchase/finalize")
+async def finalize_purchase(
+    request_id: str = Body(...),
+    approved: bool = Body(...),
+    recipients: List[str] = Body(...),
+    wallet_address: str = Body(...)
+):
+    """
+    Finalize a purchase request
+    """
+    try:
+        print(f"Finalizing purchase request {request_id}, approved: {approved}")
+
+        # Check if the wallet address is provided
+        if wallet_address:
+            print(f"Request from wallet address: {wallet_address}")
+
+        # Check if the request exists
+        request_file = f"local_storage/purchases/{request_id}.json"
+        if not os.path.exists(request_file):
+            raise HTTPException(status_code=404, detail=f"Purchase request {request_id} not found")
+
+        # Load the request data
+        with open(request_file, "r") as f:
+            purchase_data = json.load(f)
+
+        # Check if the request has already been finalized
+        if purchase_data.get("status") == "finalized":
+            raise HTTPException(status_code=400, detail=f"Purchase request {request_id} has already been finalized")
+
+        # Check if the request has been replied to
+        if purchase_data.get("status") != "replied" and "template_cid" not in purchase_data:
+            raise HTTPException(status_code=400, detail=f"Purchase request {request_id} has not been replied to yet")
+
+        # Update the request status
+        purchase_data["status"] = "finalized"
+        purchase_data["finalized_at"] = int(time.time())
+        purchase_data["approved"] = approved
+        purchase_data["recipients"] = recipients
+
+        # Create a transaction record
+        transaction = {
+            "type": "Buyer Finalize",
+            "request_id": request_id,
+            "buyer": wallet_address,
+            "approved": approved,
+            "recipients": recipients,
+            "timestamp": int(time.time()),
+            "details": {
+                "message": "Purchase finalized"
+            }
+        }
+
+        # Generate a fake transaction hash
+        tx_hash = f"0x{hashlib.sha256(json.dumps(transaction).encode()).hexdigest()}"
+        transaction["transaction_hash"] = tx_hash
+        purchase_data["finalize_tx_hash"] = tx_hash
+
+        # Save the updated request data
+        with open(request_file, "w") as f:
+            json.dump(purchase_data, f)
+
+        # Save the transaction
+        save_transaction(transaction)
+
+        # Return the result
+        return {
+            "success": True,
+            "message": "Purchase finalized successfully",
+            "transaction_hash": tx_hash,
+            "approved": approved
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in finalize_purchase: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

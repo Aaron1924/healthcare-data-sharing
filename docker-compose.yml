@@ -1,4 +1,4 @@
-version: '3'
+version: '3.8'
 
 services:
   web:
@@ -10,12 +10,19 @@ services:
     volumes:
       - ./app:/app
       - ./artifacts:/app/artifacts
+      - ./local_storage:/app/local_storage
     depends_on:
       - api
     environment:
       - API_URL=http://api:8000/api
     networks:
       - healthcare-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   api:
     build:
@@ -26,24 +33,45 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./artifacts:/app/artifacts
-    # No dependencies since we're using an external IPFS container
+      - ./local_storage:/app/local_storage
+    depends_on:
+      - ipfs
     environment:
-      - IPFS_URL=http://host.docker.internal:5001
+      - IPFS_URL=http://ipfs:5001
       - BASE_RPC_URL=${BASE_RPC_URL:-https://goerli.base.org}
-      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS}
+      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS:-0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6}
       - PRIVATE_KEY=${PRIVATE_KEY}
       - MCL_LIB_PATH=/usr/local/lib/mcl
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks:
       - healthcare-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Using external IPFS container named 'ipfs-node'
-  # To connect to it, we'll use the host network
-  # The IPFS API is available at http://host.docker.internal:5001 or http://localhost:5001
+  ipfs:
+    image: ipfs/kubo:latest
+    ports:
+      - "4001:4001"  # IPFS swarm
+      - "5001:5001"  # IPFS API
+      - "8080:8080"  # IPFS Gateway
+    volumes:
+      - ipfs-data:/data/ipfs
+      - ./local_storage:/export
+    networks:
+      - healthcare-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ipfs", "id"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   healthcare-network:
     driver: bridge
 
-# No volumes needed since we're using an external IPFS container
+volumes:
+  ipfs-data:
