@@ -1,0 +1,178 @@
+# MVP Blueprint – Decentralized Healthcare Data Sharing (BASE Testnet)
+
+*A pared‑down, end‑to‑end plan for a first working prototype.  Everything is trimmed for speed of execution while keeping the core cryptographic guarantees laid out in the paper and the three workflows depicted in the diagrams.*
+
+---
+
+## 1 • Scope & Assumptions
+- **Deliverable** : one public web‑app (Streamlit) plus a Python/FastAPI backend running on a single VPS or Docker host.  
+- **Storage** : an IPFS daemon on the same host (patients + hospital pin sets).  
+- **Chain** : Coinbase **BASE Goerli** (free testnet) for all on‑chain actions.  
+- **Login** : MetaMask (or any EIP‑1193 wallet) via Wallet Connect; wallet address doubles as user ID.  
+- **Smart‑contract** : *one* Solidity contract handling store/share/purchase, kept <300 lines.  
+- **Crypto library** : existing `backend/crypto/` folder already contains AES, SHA‑256, and Choi‑06 group signature helpers.  
+- **Out of scope** : analytics dashboards, production hardening, multi‑hospital federation.
+
+---
+
+## 2 • High‑Level Architecture
+```
+┌───────────────┐        ┌──────────────────┐
+│ Streamlit UI  │─HTTP─► │  FastAPI Server  │
+│  (React-lite) │◄────── │  /api/*          │
+└───────────────┘        └──────────────────┘
+        ▲                         ▲
+        │ WebSockets (events)     │
+        │                         │
+        │                         │
+┌──────────────────┐      ┌──────────────────┐
+│   IPFS Daemon    │◄────►│  BASE RPC (Infura│
+│  :5001 API       │      │    /Alchemy)    │
+└──────────────────┘      └──────────────────┘
+```
+*Everything runs in **three Docker containers**: `web`, `api`, `ipfs`.*
+
+---
+
+## 3 • Component List (minimal)
+| Layer | Tech | Key File / Folder | Responsibility |
+|-------|------|-------------------|----------------|
+| **UI** | Streamlit + Web3.py | `app/main.py` | Wallet connect, forms for Storing, Sharing, Purchasing. |
+| **API** | FastAPI + web3.py | `backend/api.py` | REST endpoints, IPFS proxy calls, chain tx signing. |
+| **Crypto** | Python (Rust ffi optional) | `backend/crypto/` | AES‑GCM, SHA‑256, group sig. |
+| **IPFS** | go‑ipfs 0.24 | Docker image `ipfs/kubo` | Pin & fetch encrypted records. |
+| **Smart‑contract** | Solidity 0.8.x | `contracts/DataHub.sol` | Single contract with events + escrow logic. |
+
+---
+
+## 4 • Detailed Workflows  ✅  *(retained from previous draft)*
+### 4.1 Storing
+1. **Doctor** fills record form → Streamlit posts `/api/records`.  
+2. API builds Merkle root, calls `GS.sign`, hands JSON + `sig` back to **Patient** (auth via wallet).  
+3. Patient encrypts record with `K_patient`, uploads to IPFS → gets `cid`.  
+4. Patient calls `DataHub.storeData(cid, merkleRoot, sig)` (BASE testnet).  
+5. Event `DataStored` is emitted; UI shows confirmation.
+
+### 4.2 Sharing
+1. Patient selects a record, API pulls & decrypts with `K_patient`.  
+2. Generates `K_temp`, re‑encrypts → `cid_share`.  
+3. Encrypts `K_temp` with **doctor’s** wallet public key (ECIES).  
+4. Sends `cid_share` + `EK_temp` off‑chain (REST) or via contract optional helper `postShare`.  
+5. Doctor retrieves, decrypts `K_temp`, then `ERecSharing`.
+
+### 4.3 Purchasing
+1. **Buyer** wallet → `request(templateHash, escrow)` on‑chain.  
+2. **Hospital** backend matches patients, REST‑pings them.  
+3. Patient hashes requested fields, encrypts template ⇒ `cid_template`.  
+4. Hospital submits `reply(requestId, cid_template)`; emits `ReplySubmitted`.  
+5. Buyer off‑chain verifies Merkle proofs & `GS.verify`.  
+6. Calls `finalize(requestId, ok)` → escrow paid out or refund.
+
+*(These steps mirror the diagrams; only UX sugar is removed.)*
+
+---
+
+## 5 • Data Schemas  ✅
+```jsonc
+// CERT structure
+{
+  "sig": "0x…",         // 362‑byte group signature (hex)
+  "eId": "0x…"          // PCS(hospitalInfo || K_patient)
+}
+
+// On‑chain tuple (Solidity struct)
+struct RecordMeta {
+  bytes32 cid;        // IPFS CID (v1 hashed to bytes32)
+  bytes32 merkleRoot; // idRec
+  bytes   sig;        // group signature
+  address owner;      // patient wallet
+  uint256 timestamp;
+}
+```
+
+---
+
+## 6 • Smart‑Contract Sketch (`DataHub.sol`)
+```solidity
+contract DataHub {
+    struct RecordMeta { bytes32 cid; bytes32 merkleRoot; bytes sig; address owner; }
+    mapping(bytes32 => RecordMeta) public records; // key = merkleRoot
+
+    // minimal escrow for purchasing
+    struct Purchase { address buyer; uint256 amount; bool replied; bytes32 templateCid; bool done; }
+    mapping(uint256 => Purchase) public purchases;
+    uint256 public seq;
+
+    event DataStored(bytes32 merkleRoot, bytes32 cid, address indexed owner);
+    event RequestOpen(uint256 id, bytes32 templateHash, address buyer, uint256 amount);
+    event ReplySubmitted(uint256 id, bytes32 templateCid, address hospital);
+    event PaymentReleased(uint256 id, address[] recipients);
+
+    function storeData(bytes32 cid, bytes32 root, bytes calldata sig) external {
+        records[root] = RecordMeta(cid, root, sig, msg.sender);
+        emit DataStored(root, cid, msg.sender);
+    }
+
+    function request(bytes32 templateHash) external payable returns (uint256 id) {
+        require(msg.value > 0, "escrow");
+        id = ++seq;
+        purchases[id] = Purchase(msg.sender, msg.value, false, 0x0, false);
+        emit RequestOpen(id, templateHash, msg.sender, msg.value);
+    }
+
+    function reply(uint256 id, bytes32 templateCid) external {
+        Purchase storage p = purchases[id];
+        require(!p.replied, "dup");
+        p.replied = true; p.templateCid = templateCid;
+        emit ReplySubmitted(id, templateCid, msg.sender);
+    }
+
+    function finalize(uint256 id, bool ok, address payable[] calldata recipients) external {
+        Purchase storage p = purchases[id];
+        require(!p.done && p.replied, "state");
+        require(msg.sender == p.buyer, "auth");
+        p.done = true;
+        if (ok) {
+            uint256 split = p.amount / recipients.length;
+            for (uint i=0;i<recipients.length;i++) recipients[i].transfer(split);
+        } else {
+            payable(p.buyer).transfer(p.amount);
+        }
+        emit PaymentReleased(id, recipients);
+    }
+}
+```
+*~190 compiled bytecode size; safe‑Math free thanks to Solidity 0.8 overflow checks.*
+
+---
+
+## 7 • Development Stack & Repo Layout
+```
+root/
+├─ app/            # Streamlit UI
+│  └─ main.py
+├─ backend/
+│  ├─ api.py       # FastAPI entrypoint
+│  ├─ crypto/      # AES, Merkle, group‑sig modules (provided)
+│  └─ models.py
+├─ contracts/
+│  └─ DataHub.sol
+├─ docker-compose.yml
+└─ README.md
+```
+`docker‑compose up` brings up `ipfs`, `api`, `web`.
+
+---
+
+## 8 • Deployment (BASE Goerli)
+1. Fund deployer wallet with test ETH (faucet).  
+2. `forge create --rpc-url $BASE_RPC --private-key $PK contracts/DataHub.sol:DataHub`  
+3. Copy contract address into `backend/.env` → API uses web3.py to send txs.  
+4. `docker-compose up` – backend connects to IPFS localhost:5001 and BASE RPC.
+
+---
+
+## 9 • Testing & Next Steps
+- **Happy‑path demo**: run `pytest tests/test_happy.py` (stores, shares, purchases one record).  
+- **Manual UX**: open `localhost:8501` for Streamlit UI, try the three workflows.  
+- **Milestone after review**: plug in real group‑sig Rust ffi for speed, add unit fee splitting logic if multiple patients.

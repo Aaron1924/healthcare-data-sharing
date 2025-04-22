@@ -1,0 +1,49 @@
+version: '3'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./app:/app
+      - ./artifacts:/app/artifacts
+    depends_on:
+      - api
+    environment:
+      - API_URL=http://api:8000/api
+    networks:
+      - healthcare-network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend
+      - ./artifacts:/app/artifacts
+    # No dependencies since we're using an external IPFS container
+    environment:
+      - IPFS_URL=http://host.docker.internal:5001
+      - BASE_RPC_URL=${BASE_RPC_URL:-https://goerli.base.org}
+      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS}
+      - PRIVATE_KEY=${PRIVATE_KEY}
+      - MCL_LIB_PATH=/usr/local/lib/mcl
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - healthcare-network
+
+  # Using external IPFS container named 'ipfs-node'
+  # To connect to it, we'll use the host network
+  # The IPFS API is available at http://host.docker.internal:5001 or http://localhost:5001
+
+networks:
+  healthcare-network:
+    driver: bridge
+
+# No volumes needed since we're using an external IPFS container

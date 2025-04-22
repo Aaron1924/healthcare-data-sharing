@@ -179,3 +179,18 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+# Hardhat files
+cache/
+artifacts/
+typechain-types/
+
+# Node.js dependencies
+node_modules/
+
+# Hardhat coverage
+coverage/
+coverage.json
+
+# Local IPFS storage (fallback when IPFS daemon is not available)
+local_storage/
+

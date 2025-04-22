@@ -1,0 +1,10 @@
+# Web UI
+streamlit>=1.25.0
+requests==2.28.2
+python-dotenv==1.0.0
+
+# Blockchain (for web3 connection in UI)
+web3>=6.0.0
+
+# Explicitly set protobuf version to resolve conflict
+protobuf>=4.21.6

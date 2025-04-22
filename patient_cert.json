@@ -1,0 +1,8 @@
+{
+  "cid": "QmXyZ123456789abcdefghijklmnopqrstuvwxyz",
+  "merkleRoot": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+  "signature": "0x9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba",
+  "eId": "PCS_encrypted_hospital_info_and_key_123456789abcdefghijklmnopqrstuvwxyz",
+  "doctorId": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "timestamp": 1682345678
+}

@@ -1,0 +1,32 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+# Install system dependencies for pygroupsig
+RUN apt-get update && apt-get install -y \
+    git \
+    cmake \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone and build MCL library
+RUN git clone https://github.com/herumi/mcl.git /tmp/mcl \
+    && cd /tmp/mcl \
+    && cmake -B build . \
+    && make -C build \
+    && mkdir -p /usr/local/lib/mcl \
+    && cp -r /tmp/mcl/build/lib/* /usr/local/lib/mcl/ \
+    && rm -rf /tmp/mcl
+
+# Set MCL_LIB_PATH environment variable
+ENV MCL_LIB_PATH=/usr/local/lib/mcl
+
+COPY backend/ /app/backend/
+COPY pygroupsig/ /app/pygroupsig/
+
+EXPOSE 8000
+
+CMD ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]
