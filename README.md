@@ -81,37 +81,8 @@ New contributors do NOT need to deploy the contract again. Simply use this addre
 CONTRACT_ADDRESS=0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6
 ```
 
-### Contract Development
 
-The project uses Hardhat to compile and interact with the DataHub smart contract on the BASE Sepolia testnet.
 
-#### Contract Prerequisites
-
-- Node.js (v14+)
-- npm or yarn
-- A wallet with BASE Sepolia testnet ETH (get from [BASE Sepolia Faucet](https://www.coinbase.com/faucets/base-sepolia-faucet))
-
-#### Development Steps
-
-1. Install dependencies:
-
-   ```bash
-   npm install
-   ```
-
-2. Compile the contract:
-
-   ```bash
-   npm run compile
-   ```
-
-3. Run tests to ensure everything works correctly:
-
-   ```bash
-   npm test
-   ```
-
-For more detailed instructions, see the [contracts/README.md](contracts/README.md) file.
 
 ## MCL Setup
 
@@ -171,15 +142,26 @@ install docker and docker compose
 ```bash
 docker-compose up --build
 ```
+To stop the application:
+```bash
+docker-compose down
+```
+
+To rebuild after making changes:
+```bash
+docker-compose up --build
+```
 2.You can run the application using the provided run.py script:
 
 ```bash
 python -m uvicorn backend.api:app --host 0.0.0.0 --port 8000
 streamlit run app/main.py
+or
+python run.py
 ```
-Frontend: http://localhost:8501
-Backend API: http://localhost:8000
-IPFS Gateway: http://localhost:8080
+- Backend: http://localhost:8000
+- Frontend: http://localhost:8501
+- IPFS: http://localhost:5001/webui
 This will start all the required services (IPFS, backend, and frontend). You can also run specific components:
 
 ```bash
@@ -197,35 +179,6 @@ You can also check if the backend components are working correctly:
 
 ```bash
 python check_backend.py
-```
-
-### Using Docker Compose (Recommended)
-
-The application can be run using Docker Compose, which will set up all required services:
-
-```bash
-# Build and start the services
-docker-compose up --build
-```
-
-This will start:
-1. The backend API server (FastAPI)
-2. The frontend web application (Streamlit)
-3. An IPFS node for storing encrypted records
-
-You can access the application at:
-- Frontend: http://localhost:8501
-- Backend API: http://localhost:8000
-- IPFS Gateway: http://localhost:8080
-
-To stop the application:
-```bash
-docker-compose down
-```
-
-To rebuild after making changes:
-```bash
-docker-compose up --build
 ```
 
 ## pygroupsig Library

@@ -53,8 +53,7 @@ module.exports = {
 
   etherscan: {
     apiKey: {
-      // Basescan doesn't require an API key for verification
-      baseSepolia: "PLACEHOLDER",
+      baseSepolia: "I61T8UZK7YKRC8P61BHF6237PG9GC2VK3Y",
     },
     customChains: [
       {

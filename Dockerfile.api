@@ -2,27 +2,30 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-COPY requirements-api.txt .
-RUN pip install --no-cache-dir -r requirements-api.txt
-
-# Install system dependencies for pygroupsig
+# Install system dependencies first
 RUN apt-get update && apt-get install -y \
     git \
     cmake \
     build-essential \
+    gcc \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Now install Python packages
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir -r requirements-api.txt
+
 # Clone and build MCL library
-RUN git clone https://github.com/herumi/mcl.git /tmp/mcl \
-    && cd /tmp/mcl \
-    && cmake -B build . \
-    && make -C build \
-    && mkdir -p /usr/local/lib/mcl \
-    && cp -r /tmp/mcl/build/lib/* /usr/local/lib/mcl/ \
-    && rm -rf /tmp/mcl
+RUN git clone https://github.com/herumi/mcl.git /app/mcl \
+    && cd /app/mcl \
+    && mkdir -p build \
+    && cd build \
+    && cmake .. \
+    && make \
+    && cd /app
 
 # Set MCL_LIB_PATH environment variable
-ENV MCL_LIB_PATH=/usr/local/lib/mcl
+ENV MCL_LIB_PATH=/app/mcl/build/lib
 
 COPY backend/ /app/backend/
 COPY pygroupsig/ /app/pygroupsig/

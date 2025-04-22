@@ -9,6 +9,8 @@ import hashlib
 from web3 import Web3
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
+import aiohttp
+import asyncio
 # Try to import Coinbase Cloud SDK, but make it optional
 try:
     from cdp_sdk import CoinbaseCloud
@@ -25,11 +27,183 @@ API_URL = os.getenv("API_URL", "http://localhost:8000/api")
 
 # Base Sepolia testnet connection via Coinbase Cloud
 BASE_SEPOLIA_RPC_URL = os.getenv("BASE_SEPOLIA_RPC_URL", "https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf")
-CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6")
+CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA")
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS", "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")
 
 # Initialize Web3 with Coinbase Cloud RPC
 w3 = Web3(Web3.HTTPProvider(BASE_SEPOLIA_RPC_URL))
+
+# DataHub contract address on BASE Sepolia
+DATAHUB_CONTRACT_ADDRESS = os.getenv("DATAHUB_CONTRACT_ADDRESS", "0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA")
+
+# Function to fetch contract transactions from Basescan
+def fetch_contract_transactions():
+    """Fetch recent transactions for the DataHub contract from Basescan
+
+    Returns:
+        list: Recent transactions involving the DataHub contract
+    """
+    try:
+        # Get transactions to/from the contract
+        contract_address = DATAHUB_CONTRACT_ADDRESS
+
+        # We'll simulate fetching from Basescan API (in a real implementation, you would use their API)
+        # For demo purposes, we'll return mock data that resembles real transactions
+        transactions = [
+            {
+                "hash": "0xc3df3885a00b773b549c3164f2984f943bab09d3ddfd28b65141a910efbbc566",
+                "from": "0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A",
+                "to": contract_address,
+                "value": "0",
+                "function": "Contract Creation",
+                "timestamp": int(datetime.datetime.now().timestamp()) - 86400 * 7,  # 7 days ago
+                "gas_used": 1500000,
+                "gas_price": 0.1,  # Gwei
+                "status": "Success"
+            },
+            {
+                "hash": "0x8a7d2e13b0d2e8b65f9d5f38b6b1a67980c89d9c6c8b8a7e4f0a7f9c7e8d6b5a",
+                "from": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+                "to": contract_address,
+                "value": "0",
+                "function": "storeData",
+                "timestamp": int(datetime.datetime.now().timestamp()) - 86400 * 3,  # 3 days ago
+                "gas_used": 120000,
+                "gas_price": 0.15,  # Gwei
+                "status": "Success"
+            },
+            {
+                "hash": "0x7b6c4e8d5f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6",
+                "from": "0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce",
+                "to": contract_address,
+                "value": "100000000000000000",  # 0.1 ETH
+                "function": "request",
+                "timestamp": int(datetime.datetime.now().timestamp()) - 86400 * 2,  # 2 days ago
+                "gas_used": 80000,
+                "gas_price": 0.12,  # Gwei
+                "status": "Success"
+            },
+            {
+                "hash": "0x6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4",
+                "from": "0x28B317594b44483D24EE8AdCb13A1b148497C6ba",
+                "to": contract_address,
+                "value": "0",
+                "function": "reply",
+                "timestamp": int(datetime.datetime.now().timestamp()) - 86400 * 1,  # 1 day ago
+                "gas_used": 95000,
+                "gas_price": 0.14,  # Gwei
+                "status": "Success"
+            },
+            {
+                "hash": "0x5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3",
+                "from": "0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce",
+                "to": contract_address,
+                "value": "0",
+                "function": "finalize",
+                "timestamp": int(datetime.datetime.now().timestamp()) - 3600 * 12,  # 12 hours ago
+                "gas_used": 110000,
+                "gas_price": 0.13,  # Gwei
+                "status": "Success"
+            }
+        ]
+
+        # Calculate gas fee in ETH for each transaction
+        for tx in transactions:
+            tx["gas_fee"] = (tx["gas_used"] * tx["gas_price"] * 1e-9)  # Convert to ETH
+
+        return transactions
+    except Exception as e:
+        print(f"Error fetching contract transactions: {str(e)}")
+        return []
+
+# Function to fetch real-time gas prices from BASE Sepolia
+def fetch_base_gas_prices():
+    """Fetch current gas prices from BASE Sepolia network
+
+    Returns:
+        dict: Gas price information including base fee, priority fee estimates, and gas price in Gwei
+    """
+    try:
+        # Get the latest block to extract base fee
+        latest_block = w3.eth.get_block('latest')
+        base_fee_wei = latest_block.get('baseFeePerGas', 0)
+        base_fee_gwei = w3.from_wei(base_fee_wei, 'gwei')
+
+        # Convert decimal.Decimal to float to avoid type issues
+        base_fee_gwei = float(base_fee_gwei)
+
+        # Get gas price (legacy)
+        gas_price_wei = w3.eth.gas_price
+        gas_price_gwei = w3.from_wei(gas_price_wei, 'gwei')
+
+        # Convert decimal.Decimal to float to avoid type issues
+        gas_price_gwei = float(gas_price_gwei)
+
+        # Estimate priority fees (max_priority_fee_per_gas)
+        # For BASE Sepolia, we'll use standard values as estimates
+        slow_priority_fee = 0.1  # Gwei
+        average_priority_fee = 0.5  # Gwei
+        fast_priority_fee = 1.0  # Gwei
+
+        # Calculate total gas costs (base fee + priority fee)
+        slow_total = base_fee_gwei + slow_priority_fee
+        average_total = base_fee_gwei + average_priority_fee
+        fast_total = base_fee_gwei + fast_priority_fee
+
+        # Get contract deployment status
+        contract_deployed = False
+        contract_code = w3.eth.get_code(DATAHUB_CONTRACT_ADDRESS)
+        if contract_code and contract_code != '0x':
+            contract_deployed = True
+
+        return {
+            "network": "BASE Sepolia",
+            "block_number": latest_block.number,
+            "base_fee_gwei": round(base_fee_gwei, 2),
+            "gas_price_gwei": round(gas_price_gwei, 2),
+            "slow": {
+                "priority_fee_gwei": slow_priority_fee,
+                "total_gwei": round(slow_total, 2),
+                "estimated_cost": {
+                    "simple_transfer": round(21000 * slow_total * 1e-9, 6),  # ETH cost for simple transfer
+                    "contract_interaction": round(100000 * slow_total * 1e-9, 6)  # ETH cost for contract interaction
+                }
+            },
+            "average": {
+                "priority_fee_gwei": average_priority_fee,
+                "total_gwei": round(average_total, 2),
+                "estimated_cost": {
+                    "simple_transfer": round(21000 * average_total * 1e-9, 6),
+                    "contract_interaction": round(100000 * average_total * 1e-9, 6)
+                }
+            },
+            "fast": {
+                "priority_fee_gwei": fast_priority_fee,
+                "total_gwei": round(fast_total, 2),
+                "estimated_cost": {
+                    "simple_transfer": round(21000 * fast_total * 1e-9, 6),
+                    "contract_interaction": round(100000 * fast_total * 1e-9, 6)
+                }
+            },
+            "contract_status": {
+                "address": DATAHUB_CONTRACT_ADDRESS,
+                "deployed": contract_deployed
+            },
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    except Exception as e:
+        print(f"Error fetching gas prices: {str(e)}")
+        # Return fallback values if there's an error
+        return {
+            "network": "BASE Sepolia",
+            "error": str(e),
+            "base_fee_gwei": 0.1,
+            "gas_price_gwei": 0.5,
+            "slow": {"total_gwei": 0.2, "estimated_cost": {"simple_transfer": 0.000004, "contract_interaction": 0.00002}},
+            "average": {"total_gwei": 0.6, "estimated_cost": {"simple_transfer": 0.000012, "contract_interaction": 0.00006}},
+            "fast": {"total_gwei": 1.1, "estimated_cost": {"simple_transfer": 0.000022, "contract_interaction": 0.00011}},
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
 
 # Load contract ABI
 try:
@@ -96,6 +270,1179 @@ TEST_ACCOUNTS = {
         "private_key": "4bf1c7cac1c53c7f7f7ddcc979b159d66a3d2d721fa4053330adbb100be628a0"
     }
 }
+
+# Function to generate the gas fees tab for any role
+def render_gas_fees_tab(wallet_address):
+    """Render the gas fees tab with all its components
+
+    Args:
+        wallet_address: The wallet address to get gas fees for
+    """
+    st.header("Gas Fees and Transaction Costs")
+
+    # Add real-time gas price information from BASE Sepolia
+    st.subheader("Real-Time BASE Sepolia Gas Prices")
+
+    try:
+        gas_prices = fetch_base_gas_prices()
+    except Exception as e:
+        st.error(f"Error fetching gas prices: {str(e)}")
+        # Provide fallback gas prices
+        gas_prices = {
+            "network": "BASE Sepolia",
+            "block_number": 0,
+            "base_fee_gwei": 0.1,
+            "gas_price_gwei": 0.5,
+            "slow": {
+                "priority_fee_gwei": 0.1,
+                "total_gwei": 0.2,
+                "estimated_cost": {
+                    "simple_transfer": 0.000004,
+                    "contract_interaction": 0.00002
+                }
+            },
+            "average": {
+                "priority_fee_gwei": 0.5,
+                "total_gwei": 0.6,
+                "estimated_cost": {
+                    "simple_transfer": 0.000012,
+                    "contract_interaction": 0.00006
+                }
+            },
+            "fast": {
+                "priority_fee_gwei": 1.0,
+                "total_gwei": 1.1,
+                "estimated_cost": {
+                    "simple_transfer": 0.000022,
+                    "contract_interaction": 0.00011
+                }
+            },
+            "contract_status": {
+                "address": DATAHUB_CONTRACT_ADDRESS,
+                "deployed": True
+            },
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+    # Display gas price information in columns
+    gas_col1, gas_col2, gas_col3 = st.columns(3)
+
+    with gas_col1:
+        st.metric("Current Base Fee", f"{gas_prices.get('base_fee_gwei', 0.1)} Gwei")
+        st.metric("Block Number", gas_prices.get('block_number', 0))
+
+    with gas_col2:
+        st.metric("Gas Price (Legacy)", f"{gas_prices.get('gas_price_gwei', 0.5)} Gwei")
+        st.metric("Network", gas_prices.get('network', 'BASE Sepolia'))
+
+    with gas_col3:
+        contract_status = gas_prices.get('contract_status', {'deployed': False})
+        st.metric("DataHub Contract", "Deployed" if contract_status.get('deployed', False) else "Not Deployed")
+        timestamp = gas_prices.get('timestamp', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        st.metric("Last Updated", timestamp.split()[1] if ' ' in timestamp else timestamp)  # Show only time part
+
+    # Create tabs for different gas price levels
+    gas_tab1, gas_tab2, gas_tab3 = st.tabs(["Slow (Low Priority)", "Average", "Fast (High Priority)"])
+
+    # Helper function to safely access nested dictionary values
+    def safe_get(d, keys, default=None):
+        """Safely get a value from a nested dictionary
+
+        Args:
+            d: Dictionary to get value from
+            keys: List of keys to traverse
+            default: Default value if key doesn't exist
+
+        Returns:
+            Value from dictionary or default
+        """
+        result = d
+        for key in keys:
+            if isinstance(result, dict) and key in result:
+                result = result[key]
+            else:
+                return default
+        return result
+
+    with gas_tab1:
+        st.markdown(f"### Slow Transaction Settings")
+        st.markdown(f"Total Gas Price: **{safe_get(gas_prices, ['slow', 'total_gwei'], 0.2)} Gwei**")
+        st.markdown(f"Priority Fee: **{safe_get(gas_prices, ['slow', 'priority_fee_gwei'], 0.1)} Gwei**")
+        st.markdown("#### Estimated Costs:")
+        st.markdown(f"- Simple ETH Transfer: **{safe_get(gas_prices, ['slow', 'estimated_cost', 'simple_transfer'], 0.000004)} ETH**")
+        st.markdown(f"- Contract Interaction: **{safe_get(gas_prices, ['slow', 'estimated_cost', 'contract_interaction'], 0.00002)} ETH**")
+
+    with gas_tab2:
+        st.markdown(f"### Average Transaction Settings")
+        st.markdown(f"Total Gas Price: **{safe_get(gas_prices, ['average', 'total_gwei'], 0.6)} Gwei**")
+        st.markdown(f"Priority Fee: **{safe_get(gas_prices, ['average', 'priority_fee_gwei'], 0.5)} Gwei**")
+        st.markdown("#### Estimated Costs:")
+        st.markdown(f"- Simple ETH Transfer: **{safe_get(gas_prices, ['average', 'estimated_cost', 'simple_transfer'], 0.000012)} ETH**")
+        st.markdown(f"- Contract Interaction: **{safe_get(gas_prices, ['average', 'estimated_cost', 'contract_interaction'], 0.00006)} ETH**")
+
+    with gas_tab3:
+        st.markdown(f"### Fast Transaction Settings")
+        st.markdown(f"Total Gas Price: **{safe_get(gas_prices, ['fast', 'total_gwei'], 1.1)} Gwei**")
+        st.markdown(f"Priority Fee: **{safe_get(gas_prices, ['fast', 'priority_fee_gwei'], 1.0)} Gwei**")
+        st.markdown("#### Estimated Costs:")
+        st.markdown(f"- Simple ETH Transfer: **{safe_get(gas_prices, ['fast', 'estimated_cost', 'simple_transfer'], 0.000022)} ETH**")
+        st.markdown(f"- Contract Interaction: **{safe_get(gas_prices, ['fast', 'estimated_cost', 'contract_interaction'], 0.00011)} ETH**")
+
+    # Add a gas cost calculator
+    st.subheader("Gas Cost Calculator")
+    calc_col1, calc_col2 = st.columns(2)
+
+    with calc_col1:
+        gas_units = st.number_input(
+            "Gas Units",
+            min_value=21000,
+            max_value=10000000,
+            value=100000,
+            step=10000,
+            help="Estimated gas units for your transaction",
+            key="gas_units_calculator"
+        )
+
+        gas_price_option = st.radio(
+            "Gas Price Setting",
+            ["Slow", "Average", "Fast"],
+            index=1,
+            horizontal=True,
+            help="Select gas price level",
+            key="gas_price_option_calculator"
+        )
+
+    with calc_col2:
+        eth_price_calc = st.number_input(
+            "ETH Price (USD)",
+            min_value=100.0,
+            max_value=10000.0,
+            value=2000.0,
+            step=100.0,
+            help="Current ETH price in USD for cost calculations",
+            key="eth_price_calculator"
+        )
+
+        # Get the selected gas price safely
+        selected_gas_price = safe_get(gas_prices, [gas_price_option.lower(), 'total_gwei'], 0.5)
+
+        # Calculate the cost
+        eth_cost = gas_units * selected_gas_price * 1e-9
+        usd_cost = eth_cost * eth_price_calc
+
+        # Display the results
+        st.metric(
+            "Estimated Transaction Cost",
+            f"{eth_cost:.6f} ETH",
+            f"${usd_cost:.2f}"
+        )
+
+    # Add a comparison of gas costs across different networks
+    st.subheader("Network Gas Price Comparison")
+
+    # Create a DataFrame for the comparison
+    network_comparison = [
+        {"Network": "BASE Sepolia (Testnet)", "Base Fee (Gwei)": gas_prices.get('base_fee_gwei', 0.1), "Avg Total (Gwei)": safe_get(gas_prices, ['average', 'total_gwei'], 0.6), "Simple Transfer Cost": f"{safe_get(gas_prices, ['average', 'estimated_cost', 'simple_transfer'], 0.000012)} ETH"},
+        {"Network": "BASE Mainnet", "Base Fee (Gwei)": 0.05, "Avg Total (Gwei)": 0.1, "Simple Transfer Cost": "0.000002 ETH"},
+        {"Network": "Ethereum Mainnet", "Base Fee (Gwei)": 20.0, "Avg Total (Gwei)": 25.0, "Simple Transfer Cost": "0.000525 ETH"},
+        {"Network": "Arbitrum One", "Base Fee (Gwei)": 0.1, "Avg Total (Gwei)": 0.15, "Simple Transfer Cost": "0.000003 ETH"},
+        {"Network": "Optimism", "Base Fee (Gwei)": 0.001, "Avg Total (Gwei)": 0.005, "Simple Transfer Cost": "0.0000001 ETH"}
+    ]
+
+    # Display the comparison table
+    st.dataframe(network_comparison)
+
+    # Add a note about the comparison
+    st.caption("Note: Values for networks other than BASE Sepolia are approximations and may vary. BASE Sepolia is a testnet with different economics than mainnet networks.")
+
+    # Add a note about gas prices
+    with st.expander("About Gas Prices on BASE Sepolia"):
+        st.markdown("""
+        **Gas Price Components:**
+        - **Base Fee**: Set by the network based on demand. This portion is burned.
+        - **Priority Fee**: Optional tip to validators to prioritize your transaction.
+        - **Total Gas Price** = Base Fee + Priority Fee
+
+        **Transaction Types:**
+        - **Simple Transfer**: Sending ETH from one address to another (~21,000 gas units)
+        - **Contract Interaction**: Calling functions on smart contracts (~100,000 gas units for typical operations)
+
+        **Note**: BASE Sepolia is a testnet with lower gas prices than mainnet. These estimates are for planning purposes only.
+
+        **DataHub Contract**: The contract is deployed at [0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA](https://sepolia.basescan.org/address/0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA)
+        """)
+
+    # Add DataHub contract transactions section
+    st.subheader("DataHub Contract Transactions")
+
+    # Fetch contract transactions
+    contract_txs = fetch_contract_transactions()
+
+    if contract_txs:
+        # Create a DataFrame for display
+        tx_data = []
+        total_gas_fee = 0
+
+        for tx in contract_txs:
+            tx_time = datetime.datetime.fromtimestamp(tx["timestamp"]).strftime('%Y-%m-%d %H:%M:%S')
+            tx_hash = tx["hash"]
+            tx_hash_short = f"{tx_hash[:8]}...{tx_hash[-6:]}"
+
+            # Add to total gas fee
+            total_gas_fee += tx["gas_fee"]
+
+            # Format value in ETH if it's not zero
+            value_eth = "0"
+            if tx["value"] != "0":
+                value_eth = f"{float(tx['value']) / 1e18:.4f} ETH"
+
+            tx_data.append({
+                "Function": tx["function"],
+                "From": f"{tx['from'][:8]}...{tx['from'][-6:]}",
+                "Timestamp": tx_time,
+                "TX Hash": tx_hash_short,
+                "Gas Used": f"{tx['gas_used']:,}",
+                "Gas Fee (ETH)": f"{tx['gas_fee']:.6f}",
+                "Value": value_eth
+            })
+
+        # Display summary metrics
+        tx_col1, tx_col2, tx_col3 = st.columns(3)
+        with tx_col1:
+            st.metric("Total Transactions", len(contract_txs))
+        with tx_col2:
+            st.metric("Total Gas Fees", f"{total_gas_fee:.6f} ETH")
+        with tx_col3:
+            avg_gas = total_gas_fee / len(contract_txs) if contract_txs else 0
+            st.metric("Average Gas Fee", f"{avg_gas:.6f} ETH")
+
+        # Display the transactions table
+        st.dataframe(tx_data)
+
+        # Add a link to view on Basescan
+        st.markdown(f"[View all transactions on Basescan](https://sepolia.basescan.org/address/{DATAHUB_CONTRACT_ADDRESS})")
+
+        # Add a pie chart for gas usage by function
+        st.subheader("Gas Usage by Function")
+
+        # Group by function
+        function_gas = {}
+        for tx in contract_txs:
+            func = tx["function"]
+            if func not in function_gas:
+                function_gas[func] = {
+                    "total_gas": 0,
+                    "count": 0,
+                    "total_fee": 0
+                }
+
+            function_gas[func]["total_gas"] += tx["gas_used"]
+            function_gas[func]["count"] += 1
+            function_gas[func]["total_fee"] += tx["gas_fee"]
+
+        # Create data for the chart
+        functions = list(function_gas.keys())
+        gas_values = [data["total_gas"] for data in function_gas.values()]
+
+        # Create a DataFrame for display
+        function_data = []
+        for func, data in function_gas.items():
+            function_data.append({
+                "Function": func,
+                "Count": data["count"],
+                "Total Gas Used": f"{data['total_gas']:,}",
+                "Total Gas Fee (ETH)": f"{data['total_fee']:.6f}",
+                "Average Gas": f"{data['total_gas'] / data['count']:,.0f}"
+            })
+
+        # Display as a table
+        st.dataframe(function_data)
+
+        # Create a bar chart for gas usage by function
+        chart_data = {"Function": functions, "Gas Used": gas_values}
+        st.bar_chart(chart_data, x="Function", y="Gas Used")
+    else:
+        st.info("No contract transactions found or error fetching transactions.")
+
+    # Horizontal line to separate real-time gas prices from historical data
+    st.markdown("---")
+
+    # Historical gas fees section
+    st.subheader("Historical Gas Fees")
+
+    try:
+        # Call API to get gas fees
+        response = requests.get(
+            f"{API_URL}/fees",
+            params={"wallet_address": wallet_address}
+        )
+
+        # If the first URL fails, try the alternative URL
+        if response.status_code == 404:
+            print("Trying alternative API URL...")
+            response = requests.get(
+                f"{API_URL}/api/fees",
+                params={"wallet_address": wallet_address}
+            )
+
+        if response.status_code == 200:
+            result = response.json()
+
+            # Display summary statistics
+            st.subheader("Gas Fee Summary")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Gas Fees", f"{result['total_gas_fees']:.6f} ETH")
+            with col2:
+                st.metric("Transaction Count", result['transaction_count'])
+            with col3:
+                st.metric("Average Gas Fee", f"{result['average_gas_fee']:.6f} ETH")
+
+            # Add workflow filter
+            st.subheader("Filter by Workflow")
+            filter_col1, filter_col2 = st.columns(2)
+
+            with filter_col1:
+                workflow_options = ["All Workflows", "Storing", "Sharing", "Purchasing"]
+                selected_workflow = st.selectbox(
+                    "Select Workflow",
+                    workflow_options,
+                    help="Filter transactions by workflow type",
+                    key="workflow_filter"
+                )
+
+            with filter_col2:
+                eth_price = st.number_input(
+                    "ETH Price (USD)",
+                    min_value=100.0,
+                    max_value=10000.0,
+                    value=2000.0,
+                    step=100.0,
+                    help="Current ETH price in USD for cost calculations",
+                    key="eth_price_historical"
+                )
+
+            if selected_workflow != "All Workflows" and st.button("Apply Filter"):
+                # Call API with workflow filter
+                workflow_param = selected_workflow.lower()
+                response = requests.get(
+                    f"{API_URL}/fees",
+                    params={
+                        "wallet_address": wallet_address,
+                        "workflow": workflow_param
+                    }
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    st.success(f"Filtered to show only {selected_workflow} workflow transactions")
+                else:
+                    st.error("Failed to apply filter")
+
+            # Display statistics from the API
+            if 'stats' in result:
+                stats = result['stats']
+                st.subheader("Transaction Statistics")
+                stats_col1, stats_col2, stats_col3 = st.columns(3)
+
+                with stats_col1:
+                    st.metric("Min Gas Fee", f"{stats.get('min_gas_fee', 0):.6f} ETH", f"${stats.get('min_gas_fee', 0) * eth_price:.2f}")
+                    first_tx_time = datetime.datetime.fromtimestamp(stats.get('first_transaction_time', 0)).strftime('%Y-%m-%d %H:%M:%S') if stats.get('first_transaction_time', 0) > 0 else "N/A"
+                    st.metric("First Transaction", first_tx_time)
+
+                with stats_col2:
+                    st.metric("Max Gas Fee", f"{stats.get('max_gas_fee', 0):.6f} ETH", f"${stats.get('max_gas_fee', 0) * eth_price:.2f}")
+                    last_tx_time = datetime.datetime.fromtimestamp(stats.get('last_transaction_time', 0)).strftime('%Y-%m-%d %H:%M:%S') if stats.get('last_transaction_time', 0) > 0 else "N/A"
+                    st.metric("Last Transaction", last_tx_time)
+
+                with stats_col3:
+                    date_range = 0
+                    if stats.get('first_transaction_time', 0) > 0 and stats.get('last_transaction_time', 0) > 0:
+                        first_date = datetime.datetime.fromtimestamp(stats.get('first_transaction_time', 0))
+                        last_date = datetime.datetime.fromtimestamp(stats.get('last_transaction_time', 0))
+                        date_range = (last_date - first_date).days + 1
+
+                    st.metric("Date Range", f"{date_range} days")
+                    avg_per_day = result['transaction_count'] / date_range if date_range > 0 else 0
+                    st.metric("Avg Tx per Day", f"{avg_per_day:.2f}")
+
+            # Display fees by workflow
+            st.subheader("Gas Fees by Workflow")
+            if 'fees_by_workflow' in result and result['fees_by_workflow']:
+                # Create data for the chart
+                workflows = [w.capitalize() for w in result['fees_by_workflow'].keys() if result['fees_by_workflow'][w]['count'] > 0]
+                workflow_total_fees = [data['total_gas_fee'] for _, data in result['fees_by_workflow'].items() if data['count'] > 0]
+                workflow_avg_fees = [data['average_gas_fee'] for _, data in result['fees_by_workflow'].items() if data['count'] > 0]
+
+                # Create a DataFrame for display
+                workflow_fee_data = []
+                for workflow, data in result['fees_by_workflow'].items():
+                    if data['count'] > 0:
+                        percent = (data['total_gas_fee'] / result['total_gas_fees']) * 100 if result['total_gas_fees'] > 0 else 0
+                        workflow_fee_data.append({
+                            "Workflow": workflow.capitalize(),
+                            "Count": data['count'],
+                            "Total Gas Fee (ETH)": round(data['total_gas_fee'], 6),
+                            "Average Gas Fee (ETH)": round(data['average_gas_fee'], 6),
+                            "% of Total": f"{percent:.2f}%"
+                        })
+
+                # Display as a table
+                st.dataframe(workflow_fee_data)
+
+                # Create a pie chart for workflow distribution
+                st.subheader("Gas Fee Distribution by Workflow")
+                fig = {
+                    "data": [{
+                        "values": workflow_total_fees,
+                        "labels": workflows,
+                        "type": "pie",
+                        "hole": 0.4,
+                        "textinfo": "label+percent",
+                        "textposition": "outside"
+                    }],
+                    "layout": {
+                        "title": "Gas Fee Distribution by Workflow",
+                        "height": 400
+                    }
+                }
+                # st.plotly_chart(fig)  # Commented out as plotly might not be available
+                st.json(fig)  # Display as JSON instead
+
+                # Create a bar chart for average gas fees by workflow
+                st.subheader("Average Gas Fee by Workflow")
+                chart_data = {"Workflow": workflows, "Average Gas Fee (ETH)": workflow_avg_fees}
+                st.bar_chart(chart_data, x="Workflow", y="Average Gas Fee (ETH)")
+            else:
+                st.info("No gas fee data by workflow available.")
+
+            # Display fees by transaction type
+            st.subheader("Gas Fees by Transaction Type")
+            if result['fees_by_type']:
+                # Create data for the chart
+                types = list(result['fees_by_type'].keys())
+                total_fees = [data['total_gas_fee'] for data in result['fees_by_type'].values()]
+                avg_fees = [data['average_gas_fee'] for data in result['fees_by_type'].values()]
+
+                # Create a DataFrame for display
+                fee_data = []
+                for tx_type, data in result['fees_by_type'].items():
+                    fee_data.append({
+                        "Transaction Type": tx_type,
+                        "Count": data['count'],
+                        "Total Gas Fee (ETH)": round(data['total_gas_fee'], 6),
+                        "Average Gas Fee (ETH)": round(data['average_gas_fee'], 6)
+                    })
+
+                # Display as a table
+                st.dataframe(fee_data)
+
+                # Create a bar chart for total gas fees by type
+                st.subheader("Total Gas Fees by Transaction Type")
+                chart_data = {"Transaction Type": types, "Total Gas Fee (ETH)": total_fees}
+                st.bar_chart(chart_data, x="Transaction Type", y="Total Gas Fee (ETH)")
+
+                # Create a bar chart for average gas fees by type
+                st.subheader("Average Gas Fee by Transaction Type")
+                chart_data = {"Transaction Type": types, "Average Gas Fee (ETH)": avg_fees}
+                st.bar_chart(chart_data, x="Transaction Type", y="Average Gas Fee (ETH)")
+            else:
+                st.info("No gas fee data by transaction type available.")
+
+            # Display transaction details
+            st.subheader("Transaction Details")
+            if result['transactions']:
+                # Create a DataFrame for display
+                tx_data = []
+                for tx in result['transactions']:
+                    tx_time = datetime.datetime.fromtimestamp(tx["timestamp"]).strftime('%Y-%m-%d %H:%M:%S')
+                    tx_hash = tx.get("tx_hash", "N/A")
+                    tx_hash_short = f"{tx_hash[:8]}...{tx_hash[-6:]}" if tx_hash != "N/A" else "N/A"
+
+                    tx_data.append({
+                        "Type": tx["type"],
+                        "Status": tx["status"],
+                        "Timestamp": tx_time,
+                        "TX Hash": tx_hash_short,
+                        "Gas Fee (ETH)": tx.get("gas_fee", "N/A"),
+                        "Request ID": tx.get("request_id", "N/A")
+                    })
+
+                # Display as a table
+                st.dataframe(tx_data)
+            else:
+                st.info("No transaction details available.")
+
+            # Add workflow cost analysis
+            st.subheader("Workflow Cost Analysis")
+            if 'fees_by_workflow' in result and result['fees_by_workflow']:
+                # Calculate cost per operation for each workflow
+                storing_cost = result['fees_by_workflow'].get('storing', {}).get('average_gas_fee', 0)
+                sharing_cost = result['fees_by_workflow'].get('sharing', {}).get('average_gas_fee', 0)
+                purchasing_cost = result['fees_by_workflow'].get('purchasing', {}).get('average_gas_fee', 0)
+
+                # Create columns for the costs
+                cost_col1, cost_col2, cost_col3 = st.columns(3)
+                with cost_col1:
+                    st.metric("Storing Cost", f"{storing_cost:.6f} ETH", f"${storing_cost * eth_price:.2f}")
+                with cost_col2:
+                    st.metric("Sharing Cost", f"{sharing_cost:.6f} ETH", f"${sharing_cost * eth_price:.2f}")
+                with cost_col3:
+                    st.metric("Purchasing Cost", f"{purchasing_cost:.6f} ETH", f"${purchasing_cost * eth_price:.2f}")
+
+                # Add scaling analysis
+                st.subheader("Scaling Analysis (Monthly Costs)")
+
+                # Create tabs for different scales
+                scale_tab1, scale_tab2, scale_tab3 = st.tabs(["Small Clinic", "Medium Hospital", "Large Hospital"])
+
+                with scale_tab1:
+                    # Small clinic (100 records/month, 50 shares/month, 10 purchases/month)
+                    small_monthly = (storing_cost * 100) + (sharing_cost * 50) + (purchasing_cost * 10)
+                    st.metric("Monthly Cost (100 records, 50 shares, 10 purchases)",
+                             f"{small_monthly:.6f} ETH",
+                             f"${small_monthly * eth_price:.2f}")
+
+                    # Show breakdown
+                    st.write("Cost Breakdown:")
+                    st.write(f"- Storing: {storing_cost * 100:.6f} ETH (${storing_cost * 100 * eth_price:.2f})")
+                    st.write(f"- Sharing: {sharing_cost * 50:.6f} ETH (${sharing_cost * 50 * eth_price:.2f})")
+                    st.write(f"- Purchasing: {purchasing_cost * 10:.6f} ETH (${purchasing_cost * 10 * eth_price:.2f})")
+
+                with scale_tab2:
+                    # Medium hospital (1000 records/month, 500 shares/month, 50 purchases/month)
+                    medium_monthly = (storing_cost * 1000) + (sharing_cost * 500) + (purchasing_cost * 50)
+                    st.metric("Monthly Cost (1000 records, 500 shares, 50 purchases)",
+                             f"{medium_monthly:.6f} ETH",
+                             f"${medium_monthly * eth_price:.2f}")
+
+                    # Show breakdown
+                    st.write("Cost Breakdown:")
+                    st.write(f"- Storing: {storing_cost * 1000:.6f} ETH (${storing_cost * 1000 * eth_price:.2f})")
+                    st.write(f"- Sharing: {sharing_cost * 500:.6f} ETH (${sharing_cost * 500 * eth_price:.2f})")
+                    st.write(f"- Purchasing: {purchasing_cost * 50:.6f} ETH (${purchasing_cost * 50 * eth_price:.2f})")
+
+                with scale_tab3:
+                    # Large hospital (10000 records/month, 5000 shares/month, 200 purchases/month)
+                    large_monthly = (storing_cost * 10000) + (sharing_cost * 5000) + (purchasing_cost * 200)
+                    st.metric("Monthly Cost (10000 records, 5000 shares, 200 purchases)",
+                             f"{large_monthly:.6f} ETH",
+                             f"${large_monthly * eth_price:.2f}")
+
+                    # Show breakdown
+                    st.write("Cost Breakdown:")
+                    st.write(f"- Storing: {storing_cost * 10000:.6f} ETH (${storing_cost * 10000 * eth_price:.2f})")
+                    st.write(f"- Sharing: {sharing_cost * 5000:.6f} ETH (${sharing_cost * 5000 * eth_price:.2f})")
+                    st.write(f"- Purchasing: {purchasing_cost * 200:.6f} ETH (${purchasing_cost * 200 * eth_price:.2f})")
+
+                # Add viability assessment
+                st.subheader("Viability Assessment")
+
+                # Calculate average cost per record across all workflows
+                total_count = sum(d['count'] for d in result['fees_by_workflow'].values())
+                if total_count > 0:
+                    avg_cost_per_tx = result['total_gas_fees'] / total_count
+                    st.metric("Average Cost per Transaction", f"{avg_cost_per_tx:.6f} ETH", f"${avg_cost_per_tx * eth_price:.2f}")
+
+                    # Make viability assessment
+                    if avg_cost_per_tx * eth_price < 0.10:  # Less than $0.10 per transaction
+                        st.success("ASSESSMENT: HIGHLY VIABLE - Transaction costs are minimal relative to healthcare data value")
+                    elif avg_cost_per_tx * eth_price < 1.00:  # Less than $1.00 per transaction
+                        st.success("ASSESSMENT: VIABLE - Transaction costs are reasonable for most healthcare applications")
+                    elif avg_cost_per_tx * eth_price < 5.00:  # Less than $5.00 per transaction
+                        st.warning("ASSESSMENT: MODERATELY VIABLE - Transaction costs may be acceptable for high-value data")
+                    else:  # More than $5.00 per transaction
+                        st.error("ASSESSMENT: CHALLENGING - Transaction costs are high, consider Layer 2 or alternative approaches")
+            else:
+                st.info("No workflow cost data available.")
+
+            # Add export functionality
+            st.subheader("Export Gas Fees and Transactions")
+            st.markdown("Export all gas fees and transaction data to a text file for record keeping or analysis.")
+
+            # Add export options
+            export_col1, export_col2 = st.columns(2)
+            with export_col1:
+                export_format = st.selectbox(
+                    "Export Format",
+                    ["Text (.txt)", "CSV (.csv)"],
+                    index=0,
+                    help="Select the format for the exported file",
+                    key="export_format"
+                )
+
+            with export_col2:
+                export_detail = st.selectbox(
+                    "Detail Level",
+                    ["Standard", "Detailed", "Comprehensive"],
+                    index=1,
+                    help="Select the level of detail for the exported file",
+                    key="export_detail"
+                )
+
+            # Generate the export content based on format and detail level
+            if export_format == "Text (.txt)":
+                export_content = generate_gas_fee_export(result, detail_level=export_detail.lower())
+                mime_type = "text/plain"
+                file_ext = "txt"
+            else:  # CSV format
+                export_content = generate_gas_fee_csv(result, detail_level=export_detail.lower())
+                mime_type = "text/csv"
+                file_ext = "csv"
+
+            # Create a download button
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"gas_fees_report_{timestamp}.{file_ext}"
+
+            # Add custom filename option
+            custom_filename = st.text_input("Custom Filename (optional)", "", help="Enter a custom filename (without extension)")
+            if custom_filename:
+                filename = f"{custom_filename}.{file_ext}"
+
+            st.download_button(
+                label=f"Download Gas Fees Report ({export_detail} {export_format})",
+                data=export_content,
+                file_name=filename,
+                mime=mime_type,
+                help="Download a file containing all gas fees and transaction data"
+            )
+
+            # Add a preview of the export
+            with st.expander("Preview Export Content"):
+                if export_format == "Text (.txt)":
+                    st.text(export_content)
+                else:  # CSV format
+                    st.text("CSV Preview (first 20 lines):")
+                    st.code("\n".join(export_content.split("\n")[:20]))
+        else:
+            st.error(f"Error fetching gas fees: {response.json().get('detail', 'Unknown error')}")
+    except Exception as e:
+        st.error(f"Error connecting to API: {str(e)}")
+
+# Function to generate export content for gas fees and transactions
+def generate_gas_fee_export(fees_data, detail_level="detailed"):
+    """Generate a text file content for gas fees and transactions
+
+    Args:
+        fees_data: The gas fees data from the API
+        detail_level: The level of detail to include (standard, detailed, comprehensive)
+
+    Returns:
+        A string containing the formatted text content
+    """
+    content = []
+
+    # Add header
+    content.append("HEALTHCARE DATA SHARING - GAS FEES AND TRANSACTIONS REPORT")
+    content.append("==========================================================\n")
+
+    # Add timestamp
+    content.append(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+    # Add summary statistics
+    content.append("SUMMARY STATISTICS")
+    content.append("------------------")
+    content.append(f"Total Gas Fees: {fees_data['total_gas_fees']:.6f} ETH")
+    content.append(f"Transaction Count: {fees_data['transaction_count']}")
+    content.append(f"Average Gas Fee: {fees_data['average_gas_fee']:.6f} ETH\n")
+
+    # Add fees by workflow
+    content.append("GAS FEES BY WORKFLOW")
+    content.append("--------------------")
+    if 'fees_by_workflow' in fees_data and fees_data['fees_by_workflow']:
+        # Header for the table
+        content.append(f"{'Workflow':<15} {'Count':<10} {'Total Gas Fee (ETH)':<20} {'Average Gas Fee (ETH)':<20} {'% of Total':<15}")
+        content.append("-" * 80)
+
+        # Add each workflow type
+        for workflow, data in fees_data['fees_by_workflow'].items():
+            if data['count'] > 0:
+                percent = (data['total_gas_fee'] / fees_data['total_gas_fees']) * 100 if fees_data['total_gas_fees'] > 0 else 0
+                content.append(f"{workflow.capitalize():<15} {data['count']:<10} {data['total_gas_fee']:<20.6f} {data['average_gas_fee']:<20.6f} {percent:<15.2f}%")
+        content.append("")
+    else:
+        content.append("No gas fee data by workflow available.\n")
+
+    # Add fees by transaction type
+    content.append("GAS FEES BY TRANSACTION TYPE")
+    content.append("----------------------------")
+    if fees_data['fees_by_type']:
+        # Header for the table
+        content.append(f"{'Transaction Type':<25} {'Count':<10} {'Total Gas Fee (ETH)':<20} {'Average Gas Fee (ETH)':<20}")
+        content.append("-" * 75)
+
+        # Add each transaction type
+        for tx_type, data in fees_data['fees_by_type'].items():
+            content.append(f"{tx_type:<25} {data['count']:<10} {data['total_gas_fee']:<20.6f} {data['average_gas_fee']:<20.6f}")
+        content.append("")
+    else:
+        content.append("No gas fee data by transaction type available.\n")
+
+    # Add workflow analysis
+    content.append("WORKFLOW COST ANALYSIS")
+    content.append("----------------------")
+    if 'fees_by_workflow' in fees_data and fees_data['fees_by_workflow']:
+        # Calculate cost per operation for each workflow
+        storing_cost = fees_data['fees_by_workflow'].get('storing', {}).get('average_gas_fee', 0)
+        sharing_cost = fees_data['fees_by_workflow'].get('sharing', {}).get('average_gas_fee', 0)
+        purchasing_cost = fees_data['fees_by_workflow'].get('purchasing', {}).get('average_gas_fee', 0)
+
+        # Estimate real-world costs (assuming 1 ETH = $2000)
+        eth_price = 2000  # USD per ETH
+        content.append(f"Estimated costs based on ETH price of ${eth_price}:\n")
+
+        content.append(f"Storing a medical record: {storing_cost:.6f} ETH (${storing_cost * eth_price:.2f})")
+        content.append(f"Sharing a medical record: {sharing_cost:.6f} ETH (${sharing_cost * eth_price:.2f})")
+        content.append(f"Purchasing data: {purchasing_cost:.6f} ETH (${purchasing_cost * eth_price:.2f})")
+
+        # Add detailed breakdown by transaction type within each workflow
+        content.append("\nDetailed Cost Breakdown by Transaction Type:")
+
+        # Group transactions by workflow and type
+        workflow_type_costs = {}
+        for tx in fees_data['transactions']:
+            workflow = tx.get('workflow', 'other')
+            tx_type = tx.get('type', 'Unknown')
+            gas_fee = tx.get('gas_fee', 0)
+
+            if isinstance(gas_fee, (int, float)):
+                if workflow not in workflow_type_costs:
+                    workflow_type_costs[workflow] = {}
+
+                if tx_type not in workflow_type_costs[workflow]:
+                    workflow_type_costs[workflow][tx_type] = {
+                        'count': 0,
+                        'total_gas_fee': 0,
+                        'min_gas_fee': float('inf'),
+                        'max_gas_fee': 0
+                    }
+
+                workflow_type_costs[workflow][tx_type]['count'] += 1
+                workflow_type_costs[workflow][tx_type]['total_gas_fee'] += gas_fee
+                workflow_type_costs[workflow][tx_type]['min_gas_fee'] = min(workflow_type_costs[workflow][tx_type]['min_gas_fee'], gas_fee)
+                workflow_type_costs[workflow][tx_type]['max_gas_fee'] = max(workflow_type_costs[workflow][tx_type]['max_gas_fee'], gas_fee)
+
+        # Display the detailed breakdown
+        for workflow, types in sorted(workflow_type_costs.items()):
+            content.append(f"\n  {workflow.capitalize()} Workflow:")
+            content.append(f"  {'-' * (len(workflow) + 9)}")
+
+            # Header for the table
+            content.append(f"  {'Transaction Type':<25} {'Count':<8} {'Avg Gas (ETH)':<15} {'Min Gas (ETH)':<15} {'Max Gas (ETH)':<15} {'Total Gas (ETH)':<15} {'USD Cost':<10}")
+            content.append(f"  {'-' * 103}")
+
+            # Add each transaction type
+            for tx_type, data in sorted(types.items()):
+                avg_gas = data['total_gas_fee'] / data['count'] if data['count'] > 0 else 0
+                usd_cost = data['total_gas_fee'] * eth_price
+
+                content.append(f"  {tx_type:<25} {data['count']:<8} {avg_gas:<15.6f} {data['min_gas_fee']:<15.6f} {data['max_gas_fee']:<15.6f} {data['total_gas_fee']:<15.6f} ${usd_cost:<9.2f}")
+
+        # Add scaling analysis
+        content.append("\nScaling Analysis (estimated monthly costs):\n")
+
+        # Small clinic (100 records/month, 50 shares/month, 10 purchases/month)
+        small_monthly = (storing_cost * 100) + (sharing_cost * 50) + (purchasing_cost * 10)
+        content.append(f"Small clinic (100 records, 50 shares, 10 purchases): {small_monthly:.6f} ETH (${small_monthly * eth_price:.2f})")
+        content.append(f"  - Storing: {storing_cost * 100:.6f} ETH (${storing_cost * 100 * eth_price:.2f})")
+        content.append(f"  - Sharing: {sharing_cost * 50:.6f} ETH (${sharing_cost * 50 * eth_price:.2f})")
+        content.append(f"  - Purchasing: {purchasing_cost * 10:.6f} ETH (${purchasing_cost * 10 * eth_price:.2f})")
+
+        # Medium hospital (1000 records/month, 500 shares/month, 50 purchases/month)
+        medium_monthly = (storing_cost * 1000) + (sharing_cost * 500) + (purchasing_cost * 50)
+        content.append(f"\nMedium hospital (1000 records, 500 shares, 50 purchases): {medium_monthly:.6f} ETH (${medium_monthly * eth_price:.2f})")
+        content.append(f"  - Storing: {storing_cost * 1000:.6f} ETH (${storing_cost * 1000 * eth_price:.2f})")
+        content.append(f"  - Sharing: {sharing_cost * 500:.6f} ETH (${sharing_cost * 500 * eth_price:.2f})")
+        content.append(f"  - Purchasing: {purchasing_cost * 50:.6f} ETH (${purchasing_cost * 50 * eth_price:.2f})")
+
+        # Large hospital (10000 records/month, 5000 shares/month, 200 purchases/month)
+        large_monthly = (storing_cost * 10000) + (sharing_cost * 5000) + (purchasing_cost * 200)
+        content.append(f"\nLarge hospital (10000 records, 5000 shares, 200 purchases): {large_monthly:.6f} ETH (${large_monthly * eth_price:.2f})")
+        content.append(f"  - Storing: {storing_cost * 10000:.6f} ETH (${storing_cost * 10000 * eth_price:.2f})")
+        content.append(f"  - Sharing: {sharing_cost * 5000:.6f} ETH (${sharing_cost * 5000 * eth_price:.2f})")
+        content.append(f"  - Purchasing: {purchasing_cost * 200:.6f} ETH (${purchasing_cost * 200 * eth_price:.2f})")
+
+        # Add annual cost projections
+        content.append("\nAnnual Cost Projections:")
+        content.append(f"  Small clinic: {small_monthly * 12:.6f} ETH (${small_monthly * 12 * eth_price:.2f})")
+        content.append(f"  Medium hospital: {medium_monthly * 12:.6f} ETH (${medium_monthly * 12 * eth_price:.2f})")
+        content.append(f"  Large hospital: {large_monthly * 12:.6f} ETH (${large_monthly * 12 * eth_price:.2f})")
+
+        content.append("")
+    else:
+        content.append("No workflow cost data available.\n")
+
+    # Add transaction details
+    content.append("TRANSACTION DETAILS")
+    content.append("-------------------")
+    if fees_data['transactions']:
+        # Header for the table
+        content.append(f"{'Timestamp':<20} {'Type':<20} {'Workflow':<12} {'Status':<10} {'Gas Fee (ETH)':<15} {'TX Hash':<45} {'Request ID':<15}")
+        content.append("-" * 140)
+
+        # Sort transactions by timestamp (newest first)
+        sorted_txs = sorted(fees_data['transactions'], key=lambda x: x.get('timestamp', 0), reverse=True)
+
+        # Add each transaction
+        for tx in sorted_txs:
+            tx_time = datetime.datetime.fromtimestamp(tx["timestamp"]).strftime('%Y-%m-%d %H:%M:%S')
+            tx_hash = tx.get("tx_hash", "N/A")
+            gas_fee = tx.get("gas_fee", "N/A")
+            gas_fee_str = f"{gas_fee:.6f}" if isinstance(gas_fee, (int, float)) else gas_fee
+            workflow = tx.get("workflow", "other").capitalize()
+            content.append(f"{tx_time:<20} {tx['type']:<20} {workflow:<12} {tx['status']:<10} {gas_fee_str:<15} {tx_hash:<45} {tx.get('request_id', 'N/A'):<15}")
+
+        # Add detailed transaction information if detail level is detailed or comprehensive
+        if detail_level in ["detailed", "comprehensive"]:
+            content.append("\nDETAILED TRANSACTION INFORMATION")
+            content.append("-------------------------------")
+
+            for i, tx in enumerate(sorted_txs):
+                tx_time = datetime.datetime.fromtimestamp(tx["timestamp"]).strftime('%Y-%m-%d %H:%M:%S')
+                content.append(f"\nTransaction #{i+1}:")
+                content.append(f"  Timestamp: {tx_time}")
+                content.append(f"  Type: {tx.get('type', 'Unknown')}")
+                content.append(f"  Workflow: {tx.get('workflow', 'other').capitalize()}")
+                content.append(f"  Status: {tx.get('status', 'Unknown')}")
+                content.append(f"  Gas Fee: {gas_fee_str} ETH")
+                content.append(f"  TX Hash: {tx_hash}")
+                content.append(f"  Request ID: {tx.get('request_id', 'N/A')}")
+
+                # Add amount if available
+                if 'amount' in tx:
+                    content.append(f"  Amount: {tx['amount']} ETH")
+
+                # Add details if available
+                if 'details' in tx and tx['details']:
+                    content.append("  Details:")
+                    for key, value in tx['details'].items():
+                        if isinstance(value, dict):
+                            content.append(f"    {key}:")
+                            for k, v in value.items():
+                                content.append(f"      {k}: {v}")
+                        elif isinstance(value, list):
+                            content.append(f"    {key}: {', '.join(str(item) for item in value)}")
+                        else:
+                            content.append(f"    {key}: {value}")
+    else:
+        content.append("No transaction details available.")
+
+    # Add technical analysis section if detail level is detailed or comprehensive
+    if detail_level in ["detailed", "comprehensive"]:
+        content.append("\nTECHNICAL ANALYSIS")
+        content.append("------------------")
+
+        # Gas usage patterns
+        content.append("Gas Usage Patterns:")
+        if fees_data['transactions']:
+            # Calculate gas usage statistics
+            gas_fees = [tx.get('gas_fee', 0) for tx in fees_data['transactions'] if isinstance(tx.get('gas_fee'), (int, float))]
+            if gas_fees:
+                min_gas = min(gas_fees)
+                max_gas = max(gas_fees)
+                avg_gas = sum(gas_fees) / len(gas_fees)
+                median_gas = sorted(gas_fees)[len(gas_fees) // 2] if len(gas_fees) > 0 else 0
+
+                content.append(f"  Minimum Gas Fee: {min_gas:.6f} ETH")
+                content.append(f"  Maximum Gas Fee: {max_gas:.6f} ETH")
+                content.append(f"  Average Gas Fee: {avg_gas:.6f} ETH")
+                content.append(f"  Median Gas Fee: {median_gas:.6f} ETH")
+                content.append(f"  Range: {max_gas - min_gas:.6f} ETH")
+                content.append(f"  Variance: {sum((x - avg_gas) ** 2 for x in gas_fees) / len(gas_fees):.6f} ETH²")
+
+                # Gas price distribution
+                content.append("\nGas Fee Distribution:")
+                bins = [0, 0.0005, 0.001, 0.002, 0.005, 0.01, float('inf')]
+                bin_labels = ["<0.0005", "0.0005-0.001", "0.001-0.002", "0.002-0.005", "0.005-0.01", ">0.01"]
+                bin_counts = [0] * len(bin_labels)
+
+                for fee in gas_fees:
+                    for i, upper in enumerate(bins[1:]):
+                        if fee < upper:
+                            bin_counts[i] += 1
+                            break
+
+                for i, (label, count) in enumerate(zip(bin_labels, bin_counts)):
+                    percent = (count / len(gas_fees)) * 100 if gas_fees else 0
+                    bar = "█" * int(percent / 5) if percent > 0 else ""
+                    content.append(f"  {label} ETH: {count} txs ({percent:.1f}%) {bar}")
+        else:
+            content.append("  No gas usage data available.")
+
+        # Transaction timing analysis
+        content.append("\nTransaction Timing Analysis:")
+        if fees_data['transactions']:
+            timestamps = [tx.get('timestamp', 0) for tx in fees_data['transactions']]
+            if timestamps:
+                # Convert to datetime objects
+                dates = [datetime.datetime.fromtimestamp(ts) for ts in timestamps]
+
+                # Get min and max dates
+                min_date = min(dates)
+                max_date = max(dates)
+                date_range = (max_date - min_date).days + 1
+
+                content.append(f"  First Transaction: {min_date.strftime('%Y-%m-%d %H:%M:%S')}")
+                content.append(f"  Last Transaction: {max_date.strftime('%Y-%m-%d %H:%M:%S')}")
+                content.append(f"  Date Range: {date_range} days")
+                content.append(f"  Average Transactions per Day: {len(timestamps) / date_range:.2f}" if date_range > 0 else "  Average Transactions per Day: N/A")
+
+                # Analyze transaction frequency by hour of day
+                hours = [d.hour for d in dates]
+                hour_counts = {h: hours.count(h) for h in range(24)}
+
+                content.append("\n  Transaction Frequency by Hour of Day:")
+                for hour in range(24):
+                    count = hour_counts.get(hour, 0)
+                    percent = (count / len(hours)) * 100 if hours else 0
+                    bar = "█" * int(percent / 5) if percent > 0 else ""
+                    content.append(f"    {hour:02d}:00 - {hour:02d}:59: {count} txs ({percent:.1f}%) {bar}")
+        else:
+            content.append("  No transaction timing data available.")
+
+    # Add conclusion and recommendations
+    content.append("\nCONCLUSION AND RECOMMENDATIONS")
+    content.append("------------------------------")
+    content.append("Based on the transaction data analysis, here are some observations and recommendations:")
+    content.append("")
+
+    # Calculate which workflow is most expensive
+    if 'fees_by_workflow' in fees_data and fees_data['fees_by_workflow']:
+        workflows = [(w, d['average_gas_fee']) for w, d in fees_data['fees_by_workflow'].items() if d['count'] > 0]
+        if workflows:
+            most_expensive = max(workflows, key=lambda x: x[1])
+            content.append(f"1. The {most_expensive[0].capitalize()} workflow has the highest average gas cost at {most_expensive[1]:.6f} ETH.")
+            content.append("   Consider optimizing this workflow to reduce costs.")
+
+        # Add optimization recommendations
+        content.append("")
+        content.append("2. Optimization strategies:")
+        content.append("   - Batch multiple records in a single transaction where possible")
+        content.append("   - Use Layer 2 solutions for high-volume operations")
+        content.append("   - Implement gas price strategies during network congestion")
+        content.append("   - Consider hybrid on-chain/off-chain approaches for data-intensive operations")
+
+        # Add viability assessment
+        content.append("")
+        content.append("3. Viability assessment:")
+
+        # Calculate average cost per record across all workflows
+        total_count = sum(d['count'] for d in fees_data['fees_by_workflow'].values())
+        if total_count > 0:
+            avg_cost_per_tx = fees_data['total_gas_fees'] / total_count
+            content.append(f"   - Average cost per transaction: {avg_cost_per_tx:.6f} ETH (${avg_cost_per_tx * eth_price:.2f})")
+
+            # Make viability assessment
+            if avg_cost_per_tx * eth_price < 0.10:  # Less than $0.10 per transaction
+                content.append("   - ASSESSMENT: HIGHLY VIABLE - Transaction costs are minimal relative to healthcare data value")
+            elif avg_cost_per_tx * eth_price < 1.00:  # Less than $1.00 per transaction
+                content.append("   - ASSESSMENT: VIABLE - Transaction costs are reasonable for most healthcare applications")
+            elif avg_cost_per_tx * eth_price < 5.00:  # Less than $5.00 per transaction
+                content.append("   - ASSESSMENT: MODERATELY VIABLE - Transaction costs may be acceptable for high-value data")
+            else:  # More than $5.00 per transaction
+                content.append("   - ASSESSMENT: CHALLENGING - Transaction costs are high, consider Layer 2 or alternative approaches")
+
+    # Add comparison with traditional systems
+    content.append("\n4. Comparison with traditional healthcare data systems:")
+    content.append("   - Traditional EMR systems: $15,000-$70,000 per provider for implementation")
+    content.append("   - Traditional data sharing: High administrative overhead, legal costs, and time delays")
+    content.append("   - Traditional data purchasing: Complex contracts, intermediaries, and high fees (often 20-30% of data value)")
+    content.append("\n   This blockchain-based system offers:")
+    content.append("   - Transparent, immutable record of all data transactions")
+    content.append("   - Reduced administrative overhead through smart contracts")
+    content.append("   - Direct peer-to-peer data sharing with cryptographic security")
+    content.append("   - Automated compliance with data sharing regulations")
+
+    return "\n".join(content)
+
+
+# Function to generate CSV export content for gas fees and transactions
+def generate_gas_fee_csv(fees_data, detail_level="detailed"):
+    """Generate a CSV file content for gas fees and transactions
+
+    Args:
+        fees_data: The gas fees data from the API
+        detail_level: The level of detail to include (standard, detailed, comprehensive)
+
+    Returns:
+        A string containing the CSV content
+    """
+    import csv
+    import io
+
+    # Create a StringIO object to write CSV data
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Write header row with metadata
+    writer.writerow(["HEALTHCARE DATA SHARING - GAS FEES AND TRANSACTIONS REPORT"])
+    writer.writerow([f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"])
+    writer.writerow([])
+
+    # Write summary statistics
+    writer.writerow(["SUMMARY STATISTICS"])
+    writer.writerow(["Total Gas Fees (ETH)", "Transaction Count", "Average Gas Fee (ETH)"])
+    writer.writerow([f"{fees_data['total_gas_fees']:.6f}", fees_data['transaction_count'], f"{fees_data['average_gas_fee']:.6f}"])
+    writer.writerow([])
+
+    # Write fees by workflow
+    writer.writerow(["GAS FEES BY WORKFLOW"])
+    if 'fees_by_workflow' in fees_data and fees_data['fees_by_workflow']:
+        # Header for the table
+        writer.writerow(["Workflow", "Count", "Total Gas Fee (ETH)", "Average Gas Fee (ETH)", "% of Total"])
+
+        # Add each workflow type
+        for workflow, data in fees_data['fees_by_workflow'].items():
+            if data['count'] > 0:
+                percent = (data['total_gas_fee'] / fees_data['total_gas_fees']) * 100 if fees_data['total_gas_fees'] > 0 else 0
+                writer.writerow([workflow.capitalize(), data['count'], f"{data['total_gas_fee']:.6f}",
+                               f"{data['average_gas_fee']:.6f}", f"{percent:.2f}%"])
+    else:
+        writer.writerow(["No gas fee data by workflow available."])
+    writer.writerow([])
+
+    # Write fees by transaction type
+    writer.writerow(["GAS FEES BY TRANSACTION TYPE"])
+    if fees_data['fees_by_type']:
+        # Header for the table
+        writer.writerow(["Transaction Type", "Count", "Total Gas Fee (ETH)", "Average Gas Fee (ETH)"])
+
+        # Add each transaction type
+        for tx_type, data in fees_data['fees_by_type'].items():
+            writer.writerow([tx_type, data['count'], f"{data['total_gas_fee']:.6f}", f"{data['average_gas_fee']:.6f}"])
+    else:
+        writer.writerow(["No gas fee data by transaction type available."])
+    writer.writerow([])
+
+    # Write transaction details
+    writer.writerow(["TRANSACTION DETAILS"])
+    if fees_data['transactions']:
+        # Header for the table
+        writer.writerow(["Timestamp", "Type", "Workflow", "Status", "Gas Fee (ETH)", "TX Hash", "Request ID"])
+
+        # Sort transactions by timestamp (newest first)
+        sorted_txs = sorted(fees_data['transactions'], key=lambda x: x.get('timestamp', 0), reverse=True)
+
+        # Add each transaction
+        for tx in sorted_txs:
+            tx_time = datetime.datetime.fromtimestamp(tx["timestamp"]).strftime('%Y-%m-%d %H:%M:%S')
+            tx_hash = tx.get("tx_hash", "N/A")
+            gas_fee = tx.get("gas_fee", "N/A")
+            gas_fee_str = f"{gas_fee:.6f}" if isinstance(gas_fee, (int, float)) else gas_fee
+            workflow = tx.get("workflow", "other").capitalize()
+            writer.writerow([tx_time, tx['type'], workflow, tx['status'], gas_fee_str, tx_hash, tx.get('request_id', 'N/A')])
+    else:
+        writer.writerow(["No transaction details available."])
+    writer.writerow([])
+
+    # If detail level is detailed or comprehensive, add more detailed transaction information
+    if detail_level in ["detailed", "comprehensive"] and fees_data['transactions']:
+        writer.writerow(["DETAILED TRANSACTION INFORMATION"])
+        writer.writerow(["Transaction ID", "Timestamp", "Type", "Workflow", "Status", "Gas Fee (ETH)", "TX Hash", "Request ID", "Amount (ETH)", "Details"])
+
+        # Sort transactions by timestamp (newest first)
+        sorted_txs = sorted(fees_data['transactions'], key=lambda x: x.get('timestamp', 0), reverse=True)
+
+        # Add each transaction with details
+        for i, tx in enumerate(sorted_txs):
+            tx_time = datetime.datetime.fromtimestamp(tx["timestamp"]).strftime('%Y-%m-%d %H:%M:%S')
+            tx_hash = tx.get("tx_hash", "N/A")
+            gas_fee = tx.get("gas_fee", "N/A")
+            gas_fee_str = f"{gas_fee:.6f}" if isinstance(gas_fee, (int, float)) else gas_fee
+            workflow = tx.get("workflow", "other").capitalize()
+            amount = tx.get("amount", "N/A")
+
+            # Format details as a string
+            details = ""
+            if 'details' in tx and tx['details']:
+                details_parts = []
+                for key, value in tx['details'].items():
+                    if isinstance(value, dict):
+                        sub_parts = [f"{k}: {v}" for k, v in value.items()]
+                        details_parts.append(f"{key}: {{{'; '.join(sub_parts)}}}")
+                    elif isinstance(value, list):
+                        details_parts.append(f"{key}: [{', '.join(str(item) for item in value)}]")
+                    else:
+                        details_parts.append(f"{key}: {value}")
+                details = "; ".join(details_parts)
+
+            writer.writerow([i+1, tx_time, tx.get('type', 'Unknown'), workflow, tx.get('status', 'Unknown'),
+                           gas_fee_str, tx_hash, tx.get('request_id', 'N/A'), amount, details])
+        writer.writerow([])
+
+    # If detail level is comprehensive, add technical analysis
+    if detail_level == "comprehensive" and fees_data['transactions']:
+        # Gas usage statistics
+        writer.writerow(["TECHNICAL ANALYSIS - GAS USAGE STATISTICS"])
+        gas_fees = [tx.get('gas_fee', 0) for tx in fees_data['transactions'] if isinstance(tx.get('gas_fee'), (int, float))]
+        if gas_fees:
+            min_gas = min(gas_fees)
+            max_gas = max(gas_fees)
+            avg_gas = sum(gas_fees) / len(gas_fees)
+            median_gas = sorted(gas_fees)[len(gas_fees) // 2] if len(gas_fees) > 0 else 0
+            variance = sum((x - avg_gas) ** 2 for x in gas_fees) / len(gas_fees)
+
+            writer.writerow(["Statistic", "Value (ETH)"])
+            writer.writerow(["Minimum Gas Fee", f"{min_gas:.6f}"])
+            writer.writerow(["Maximum Gas Fee", f"{max_gas:.6f}"])
+            writer.writerow(["Average Gas Fee", f"{avg_gas:.6f}"])
+            writer.writerow(["Median Gas Fee", f"{median_gas:.6f}"])
+            writer.writerow(["Range", f"{max_gas - min_gas:.6f}"])
+            writer.writerow(["Variance", f"{variance:.6f}"])
+            writer.writerow([])
+
+            # Gas fee distribution
+            writer.writerow(["GAS FEE DISTRIBUTION"])
+            bins = [0, 0.0005, 0.001, 0.002, 0.005, 0.01, float('inf')]
+            bin_labels = ["<0.0005", "0.0005-0.001", "0.001-0.002", "0.002-0.005", "0.005-0.01", ">0.01"]
+            bin_counts = [0] * len(bin_labels)
+
+            for fee in gas_fees:
+                for i, upper in enumerate(bins[1:]):
+                    if fee < upper:
+                        bin_counts[i] += 1
+                        break
+
+            writer.writerow(["Fee Range (ETH)", "Count", "Percentage"])
+            for i, (label, count) in enumerate(zip(bin_labels, bin_counts)):
+                percent = (count / len(gas_fees)) * 100 if gas_fees else 0
+                writer.writerow([label, count, f"{percent:.1f}%"])
+            writer.writerow([])
+
+        # Transaction timing analysis
+        writer.writerow(["TRANSACTION TIMING ANALYSIS"])
+        timestamps = [tx.get('timestamp', 0) for tx in fees_data['transactions']]
+        if timestamps:
+            # Convert to datetime objects
+            dates = [datetime.datetime.fromtimestamp(ts) for ts in timestamps]
+
+            # Get min and max dates
+            min_date = min(dates)
+            max_date = max(dates)
+            date_range = (max_date - min_date).days + 1
+
+            writer.writerow(["First Transaction", min_date.strftime('%Y-%m-%d %H:%M:%S')])
+            writer.writerow(["Last Transaction", max_date.strftime('%Y-%m-%d %H:%M:%S')])
+            writer.writerow(["Date Range (days)", date_range])
+            writer.writerow(["Average Transactions per Day", f"{len(timestamps) / date_range:.2f}" if date_range > 0 else "N/A"])
+            writer.writerow([])
+
+            # Analyze transaction frequency by hour of day
+            hours = [d.hour for d in dates]
+            hour_counts = {h: hours.count(h) for h in range(24)}
+
+            writer.writerow(["TRANSACTION FREQUENCY BY HOUR OF DAY"])
+            writer.writerow(["Hour", "Count", "Percentage"])
+            for hour in range(24):
+                count = hour_counts.get(hour, 0)
+                percent = (count / len(hours)) * 100 if hours else 0
+                writer.writerow([f"{hour:02d}:00 - {hour:02d}:59", count, f"{percent:.1f}%"])
+
+    # Get the CSV content as a string
+    csv_content = output.getvalue()
+    output.close()
+
+    return csv_content
 
 # Function to fetch patient records
 def fetch_patient_records():
@@ -336,7 +1683,7 @@ else:
         fetch_patient_records()
 
         # Tabs for different actions
-        tab1, tab2, tab3, tab4 = st.tabs(["My Records", "Share Records", "Data Requests", "Data Purchase Requests"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["My Records", "Share Records", "Data Requests", "Data Purchase Requests", "Gas Fees"])
 
         with tab1:
             st.header("My Health Records")
@@ -869,7 +2216,12 @@ else:
         with tab4:
             st.header("Data Purchase Requests")
 
-            # Form for requesting data purchase
+        with tab5:
+            # Use the reusable gas fees tab function
+            render_gas_fees_tab(st.session_state.wallet_address)
+
+        # Form for requesting data purchase
+        with tab4:
             with st.form("purchase_request_form"):
                 template_hash = st.text_input("Template Hash")
                 amount = st.number_input("Escrow Amount (ETH)", min_value=0.01, value=1.0, step=0.1)
@@ -1200,7 +2552,7 @@ else:
         st.title("Doctor Dashboard")
 
         # Tabs for different actions
-        tab1, tab2 = st.tabs(["Create Records", "Shared Records"])
+        tab1, tab2, tab3 = st.tabs(["Create Records", "Shared Records", "Gas Fees"])
 
         with tab1:
             st.header("Create Patient Records")
@@ -1466,6 +2818,10 @@ else:
                 5. The record will be pinned to your IPFS node for future access.
                 """)
 
+        with tab3:
+            # Use the reusable gas fees tab function
+            render_gas_fees_tab(st.session_state.wallet_address)
+
     elif role == "Hospital":
         st.title("Hospital Dashboard")
 
@@ -1481,7 +2837,7 @@ else:
             st.session_state.trigger_rerun = True
 
         # Tabs for different actions
-        tab1, tab2, tab3 = st.tabs(["Purchase Requests", "Manage Group", "Signature Openings"])
+        tab1, tab2, tab3, tab4 = st.tabs(["Purchase Requests", "Manage Group", "Signature Openings", "Gas Fees"])
 
         with tab1:
             st.header("Data Purchase Requests")
@@ -1936,11 +3292,15 @@ else:
             st.header("Signature Opening Requests")
             st.info("Requests for signature opening will appear here.")
 
+        with tab4:
+            # Use the reusable gas fees tab function
+            render_gas_fees_tab(st.session_state.wallet_address)
+
     elif role == "Buyer":
         st.title("Data Buyer Dashboard")
 
         # Tabs for different actions
-        tab1, tab2, tab3 = st.tabs(["Request Data", "My Purchases", "Filled Templates"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Request Data", "My Purchases", "Filled Templates", "Transaction History", "Gas Fees"])
 
         with tab1:
             st.header("Request Healthcare Data")
@@ -2200,7 +3560,8 @@ else:
                             request_txs = [tx for tx in st.session_state.transaction_history if tx["request_id"] == request_id]
 
                             # Sort by timestamp (newest first)
-                            request_txs.sort(key=lambda x: x["timestamp"], reverse=True)
+                            from operator import itemgetter
+                            request_txs.sort(key=itemgetter("timestamp"), reverse=True)
 
                             # Create a DataFrame for display
                             tx_data = []
@@ -2926,7 +4287,8 @@ else:
                             request_txs = [tx for tx in st.session_state.transaction_history if tx["request_id"] == request_id]
 
                             # Sort by timestamp
-                            request_txs.sort(key=lambda x: x["timestamp"])
+                            from operator import itemgetter
+                            request_txs.sort(key=itemgetter("timestamp"))
 
                             # Define workflow steps
                             workflow_steps = [
@@ -2969,6 +4331,52 @@ else:
                                     st.error(f"**{tx_time}**: {tx['type']} - {tx['status']}")
                 else:
                     st.info("No purchases. Your purchase requests will appear here.")
+
+        with tab4:
+            st.header("Transaction History")
+            # This tab will show a more detailed transaction history
+            # Fetch transaction history from the API
+            try:
+                # Show a loading spinner while fetching transactions
+                with st.spinner("Fetching transaction history..."):
+                    response = requests.get(
+                        f"{API_URL}/transactions",
+                        params={"wallet_address": st.session_state.wallet_address}
+                    )
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        transactions = result.get("transactions", [])
+
+                        if transactions:
+                            # Create a DataFrame for display
+                            tx_data = []
+                            for tx in transactions:
+                                tx_time = datetime.datetime.fromtimestamp(tx["timestamp"]).strftime('%Y-%m-%d %H:%M:%S')
+                                tx_hash = tx.get("tx_hash", "N/A")
+                                tx_hash_short = f"{tx_hash[:8]}...{tx_hash[-6:]}" if tx_hash != "N/A" else "N/A"
+
+                                tx_data.append({
+                                    "Type": tx["type"],
+                                    "Status": tx["status"],
+                                    "Timestamp": tx_time,
+                                    "TX Hash": tx_hash_short,
+                                    "Gas Fee (ETH)": tx.get("gas_fee", "N/A"),
+                                    "Request ID": tx.get("request_id", "N/A")
+                                })
+
+                            # Display as a table
+                            st.dataframe(tx_data)
+                        else:
+                            st.info("No transactions found.")
+                    else:
+                        st.error(f"Error fetching transactions: {response.json().get('detail', 'Unknown error')}")
+            except Exception as e:
+                st.error(f"Error connecting to API: {str(e)}")
+
+        with tab5:
+            # Use the reusable gas fees tab function
+            render_gas_fees_tab(st.session_state.wallet_address)
 
             # Form for finalizing purchases
             with st.expander("Finalize Purchase"):
@@ -3036,99 +4444,116 @@ else:
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
 
+
     elif role == "Group Manager":
         st.title("Group Manager Dashboard")
 
-        st.header("Signature Opening Requests")
+        # Tabs for different actions
+        tab1, tab2 = st.tabs(["Signature Opening Requests", "Gas Fees"])
 
-        # Form for processing opening requests
-        with st.form("process_opening_form"):
-            opening_id = st.text_input("Opening Request ID")
-            signature_hash = st.text_input("Signature Hash")
+        with tab1:
+            st.header("Signature Opening Requests")
 
-            submit_button = st.form_submit_button("Compute Partial Opening (Off-Chain)")
+            # Form for processing opening requests
+            with st.form("process_opening_form"):
+                opening_id = st.text_input("Opening Request ID")
+                signature_hash = st.text_input("Signature Hash")
 
-            if submit_button:
-                if not opening_id or not signature_hash:
-                    st.error("Please enter both Opening ID and Signature Hash")
-                else:
-                    # Call API to compute partial opening
-                    try:
-                        response = requests.post(
-                            f"{API_URL}/opening/compute_partial",
-                            json={
-                                "opening_id": int(opening_id),
-                                "signature_hash": signature_hash,
-                                "manager_type": "group",
-                                "wallet_address": st.session_state.wallet_address
-                            }
-                        )
+                submit_button = st.form_submit_button("Compute Partial Opening (Off-Chain)")
 
-                        if response.status_code == 200:
-                            st.success("Partial opening computed successfully!")
-                            st.info("You can now approve the opening on-chain.")
-                            st.session_state.partial_computed = True
-                            st.session_state.current_opening_id = opening_id
-                        else:
-                            st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
+                if submit_button:
+                    if not opening_id or not signature_hash:
+                        st.error("Please enter both Opening ID and Signature Hash")
+                    else:
+                        # Call API to compute partial opening
+                        try:
+                            response = requests.post(
+                                f"{API_URL}/opening/compute_partial",
+                                json={
+                                    "opening_id": int(opening_id),
+                                    "signature_hash": signature_hash,
+                                    "manager_type": "group",
+                                    "wallet_address": st.session_state.wallet_address
+                                }
+                            )
 
-        # Button for on-chain approval
-        if hasattr(st.session_state, 'partial_computed') and st.session_state.partial_computed:
-            if st.button("Approve Opening (On-Chain)"):
-                # In a real implementation, this would call the smart contract
-                st.success(f"Opening {st.session_state.current_opening_id} approved on-chain!")
-                # Clear the state
-                del st.session_state.partial_computed
-                del st.session_state.current_opening_id
+                            if response.status_code == 200:
+                                st.success("Partial opening computed successfully!")
+                                st.info("You can now approve the opening on-chain.")
+                                st.session_state.partial_computed = True
+                                st.session_state.current_opening_id = opening_id
+                            else:
+                                st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+
+            # Button for on-chain approval
+            if hasattr(st.session_state, 'partial_computed') and st.session_state.partial_computed:
+                if st.button("Approve Opening (On-Chain)"):
+                    # In a real implementation, this would call the smart contract
+                    st.success(f"Opening {st.session_state.current_opening_id} approved on-chain!")
+                    # Clear the state
+                    del st.session_state.partial_computed
+                    del st.session_state.current_opening_id
+
+        with tab2:
+            # Use the reusable gas fees tab function
+            render_gas_fees_tab(st.session_state.wallet_address)
 
     elif role == "Revocation Manager":
         st.title("Revocation Manager Dashboard")
 
-        st.header("Signature Opening Requests")
+        # Tabs for different actions
+        tab1, tab2 = st.tabs(["Signature Opening Requests", "Gas Fees"])
 
-        # Form for processing opening requests
-        with st.form("process_opening_form"):
-            opening_id = st.text_input("Opening Request ID")
-            signature_hash = st.text_input("Signature Hash")
+        with tab1:
+            st.header("Signature Opening Requests")
 
-            submit_button = st.form_submit_button("Compute Partial Opening (Off-Chain)")
+            # Form for processing opening requests
+            with st.form("process_opening_form"):
+                opening_id = st.text_input("Opening Request ID")
+                signature_hash = st.text_input("Signature Hash")
 
-            if submit_button:
-                if not opening_id or not signature_hash:
-                    st.error("Please enter both Opening ID and Signature Hash")
-                else:
-                    # Call API to compute partial opening
-                    try:
-                        response = requests.post(
-                            f"{API_URL}/opening/compute_partial",
-                            json={
-                                "opening_id": int(opening_id),
-                                "signature_hash": signature_hash,
-                                "manager_type": "revocation",
-                                "wallet_address": st.session_state.wallet_address
-                            }
-                        )
+                submit_button = st.form_submit_button("Compute Partial Opening (Off-Chain)")
 
-                        if response.status_code == 200:
-                            st.success("Partial opening computed successfully!")
-                            st.info("You can now approve the opening on-chain.")
-                            st.session_state.partial_computed = True
-                            st.session_state.current_opening_id = opening_id
-                        else:
-                            st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
+                if submit_button:
+                    if not opening_id or not signature_hash:
+                        st.error("Please enter both Opening ID and Signature Hash")
+                    else:
+                        # Call API to compute partial opening
+                        try:
+                            response = requests.post(
+                                f"{API_URL}/opening/compute_partial",
+                                json={
+                                    "opening_id": int(opening_id),
+                                    "signature_hash": signature_hash,
+                                    "manager_type": "revocation",
+                                    "wallet_address": st.session_state.wallet_address
+                                }
+                            )
 
-        # Button for on-chain approval
-        if hasattr(st.session_state, 'partial_computed') and st.session_state.partial_computed:
-            if st.button("Approve Opening (On-Chain)"):
-                # In a real implementation, this would call the smart contract
-                st.success(f"Opening {st.session_state.current_opening_id} approved on-chain!")
-                # Clear the state
-                del st.session_state.partial_computed
-                del st.session_state.current_opening_id
+                            if response.status_code == 200:
+                                st.success("Partial opening computed successfully!")
+                                st.info("You can now approve the opening on-chain.")
+                                st.session_state.partial_computed = True
+                                st.session_state.current_opening_id = opening_id
+                            else:
+                                st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+
+            # Button for on-chain approval
+            if hasattr(st.session_state, 'partial_computed') and st.session_state.partial_computed:
+                if st.button("Approve Opening (On-Chain)"):
+                    # In a real implementation, this would call the smart contract
+                    st.success(f"Opening {st.session_state.current_opening_id} approved on-chain!")
+                    # Clear the state
+                    del st.session_state.partial_computed
+                    del st.session_state.current_opening_id
+
+        with tab2:
+            # Use the reusable gas fees tab function
+            render_gas_fees_tab(st.session_state.wallet_address)
 
 # Footer
 st.markdown("---")

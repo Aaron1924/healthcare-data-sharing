@@ -121,7 +121,7 @@ if ipfs_client is None:
 
 # Connect to Base Sepolia testnet via Coinbase Cloud
 BASE_SEPOLIA_RPC_URL = os.getenv("BASE_SEPOLIA_RPC_URL", "https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf")
-CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x7ab1C0aA17fAA544AE2Ca48106b92836A9eeF9a6")
+CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY", "91e5c2bed81b69f9176b6404710914e9bf36a6359122a2d1570116fc6322562e")
 # Default addresses for each role
 PATIENT_ADDRESS = os.getenv("PATIENT_ADDRESS", "0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A")
@@ -224,23 +224,84 @@ def clean_cid(cid):
 
 # Function to save a transaction to local storage
 def save_transaction(transaction):
-    """Save a transaction to the local storage."""
+    """Save a transaction to the local storage and track gas fees by workflow.
+
+    Args:
+        transaction: The transaction data to save
+
+    Returns:
+        bool: True if the transaction was saved successfully, False otherwise
+    """
     try:
         # Create the transactions directory if it doesn't exist
         os.makedirs("local_storage/transactions", exist_ok=True)
 
-        # Generate a unique ID for the transaction
-        transaction_id = f"{int(time.time())}_{random.randint(1000, 9999)}"
+        # Add workflow category based on transaction type
+        if "workflow" not in transaction:
+            # Define workflow categories based on transaction types
+            workflow_mapping = {
+                # Storing workflow
+                "Store": "storing",
+                "Record Creation": "storing",
+                "Record Upload": "storing",
+                "Record Storage": "storing",
+                "Create Record": "storing",
+                "Sign Record": "storing",
+
+                # Sharing workflow
+                "Share": "sharing",
+                "Record Sharing": "sharing",
+                "Share Record": "sharing",
+                "Encrypt Record": "sharing",
+                "Decrypt Record": "sharing",
+                "Access Record": "sharing",
+
+                # Purchasing workflow
+                "Request": "purchasing",
+                "Hospital Reply": "purchasing",
+                "Buyer Verify": "purchasing",
+                "Verification": "purchasing",
+                "Finalize": "purchasing",
+                "Revocation Request": "purchasing",
+                "Template Fill": "purchasing",
+                "Template Verification": "purchasing",
+                "Payment": "purchasing"
+            }
+
+            tx_type = transaction.get("type", "Unknown")
+            transaction["workflow"] = workflow_mapping.get(tx_type, "other")
+
+        # Generate a unique ID for the transaction if not already present
+        if "id" not in transaction:
+            transaction["id"] = f"tx-{int(time.time())}_{random.randint(1000, 9999)}"
+
+        # Add timestamp if not already present
+        if "timestamp" not in transaction:
+            transaction["timestamp"] = int(time.time())
+
+        # Add status if not already present
+        if "status" not in transaction:
+            transaction["status"] = "Completed"
 
         # Save the transaction to a file
-        file_path = f"local_storage/transactions/{transaction_id}.json"
+        file_path = f"local_storage/transactions/{transaction['id']}.json"
         with open(file_path, "w") as f:
             json.dump(transaction, f)
 
-        print(f"Transaction saved: {file_path}")
+        # Also save to workflow-specific directory for easier analysis
+        workflow = transaction.get("workflow", "other")
+        workflow_dir = f"local_storage/{workflow}_transactions"
+        os.makedirs(workflow_dir, exist_ok=True)
+        workflow_file_path = f"{workflow_dir}/{transaction['id']}.json"
+        with open(workflow_file_path, "w") as f:
+            json.dump(transaction, f)
+
+        print(f"Transaction saved: {file_path} and {workflow_file_path}")
         return True
     except Exception as e:
         print(f"Error saving transaction: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 @app.get("/api/buyer/filled-templates")
@@ -2157,6 +2218,240 @@ async def get_transactions(wallet_address: str):
         return {"transactions": transactions}
     except Exception as e:
         print(f"Error in get_transactions: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/fees")
+@app.get("/fees")
+@app.get("/api/gas-fees")
+@app.get("/gas-fees")
+async def get_fees(wallet_address: str = None, workflow: str = None):
+    """
+    Get gas fees and transaction fees for the product
+    """
+    try:
+        # Check if the local storage directory exists
+        if not os.path.exists("local_storage/purchases") and not os.path.exists("local_storage/transactions"):
+            return {
+                "total_gas_fees": 0,
+                "transaction_count": 0,
+                "average_gas_fee": 0,
+                "fees_by_type": {},
+                "fees_by_workflow": {},
+                "transactions": []
+            }
+
+        # Initialize transaction list
+        transactions = []
+
+        # Get transactions from purchases
+        if os.path.exists("local_storage/purchases"):
+            purchase_files = os.listdir("local_storage/purchases")
+            for file_name in purchase_files:
+                if not file_name.endswith(".json"):
+                    continue
+
+                file_path = f"local_storage/purchases/{file_name}"
+
+                try:
+                    with open(file_path, "r") as f:
+                        purchase_data = json.load(f)
+
+                    # Check if this purchase is related to the wallet address (if provided)
+                    is_related = True
+                    if wallet_address:
+                        is_related = False
+                        if purchase_data.get("buyer") == wallet_address:
+                            is_related = True
+                        elif purchase_data.get("hospital") == wallet_address:
+                            is_related = True
+                        elif wallet_address in purchase_data.get("recipients", []):
+                            is_related = True
+
+                    if is_related:
+                        # Collect all transactions for this purchase
+                        purchase_transactions = []
+
+                        # Initial request transaction
+                        if "transaction" in purchase_data:
+                            purchase_transactions.append(purchase_data["transaction"])
+
+                        # Reply transaction
+                        if "reply_transaction" in purchase_data:
+                            purchase_transactions.append(purchase_data["reply_transaction"])
+
+                        # Verification transaction
+                        if "verification_transaction" in purchase_data:
+                            purchase_transactions.append(purchase_data["verification_transaction"])
+
+                        # Finalize transaction
+                        if "finalize_transaction" in purchase_data:
+                            purchase_transactions.append(purchase_data["finalize_transaction"])
+
+                        # Revocation transaction
+                        if "revocation_transaction" in purchase_data:
+                            purchase_transactions.append(purchase_data["revocation_transaction"])
+
+                        # Add all transactions to the list
+                        transactions.extend(purchase_transactions)
+                except Exception as e:
+                    print(f"Error processing file {file_name}: {str(e)}")
+                    continue
+
+        # Get transactions from transactions directory
+        if os.path.exists("local_storage/transactions"):
+            transaction_files = os.listdir("local_storage/transactions")
+            for file_name in transaction_files:
+                if not file_name.endswith(".json"):
+                    continue
+
+                file_path = f"local_storage/transactions/{file_name}"
+
+                try:
+                    with open(file_path, "r") as f:
+                        transaction_data = json.load(f)
+
+                    # Check if this transaction is related to the wallet address (if provided)
+                    is_related = True
+                    if wallet_address:
+                        is_related = False
+                        if transaction_data.get("buyer") == wallet_address:
+                            is_related = True
+                        elif transaction_data.get("hospital") == wallet_address:
+                            is_related = True
+                        elif wallet_address in transaction_data.get("recipients", []):
+                            is_related = True
+
+                    if is_related:
+                        # Add to transactions list
+                        transactions.append(transaction_data)
+                except Exception as e:
+                    print(f"Error processing file {file_name}: {str(e)}")
+                    continue
+
+        # Remove duplicates (based on transaction ID)
+        unique_transactions = {}
+        for tx in transactions:
+            tx_id = tx.get("id")
+            if tx_id and tx_id not in unique_transactions:
+                unique_transactions[tx_id] = tx
+
+        # Convert back to list
+        transactions = list(unique_transactions.values())
+
+        # Sort transactions by timestamp (newest first)
+        transactions.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+
+        # Calculate total gas fees
+        total_gas_fees = sum(tx.get("gas_fee", 0) for tx in transactions)
+        transaction_count = len(transactions)
+        average_gas_fee = total_gas_fees / transaction_count if transaction_count > 0 else 0
+
+        # Define workflow categories based on transaction types
+        workflow_mapping = {
+            # Storing workflow
+            "Store": "storing",
+            "Record Creation": "storing",
+            "Record Upload": "storing",
+            "Record Storage": "storing",
+            "Create Record": "storing",
+            "Sign Record": "storing",
+
+            # Sharing workflow
+            "Share": "sharing",
+            "Record Sharing": "sharing",
+            "Share Record": "sharing",
+            "Encrypt Record": "sharing",
+            "Decrypt Record": "sharing",
+            "Access Record": "sharing",
+
+            # Purchasing workflow
+            "Request": "purchasing",
+            "Hospital Reply": "purchasing",
+            "Buyer Verify": "purchasing",
+            "Verification": "purchasing",
+            "Finalize": "purchasing",
+            "Revocation Request": "purchasing",
+            "Template Fill": "purchasing",
+            "Template Verification": "purchasing",
+            "Payment": "purchasing"
+        }
+
+        # Add workflow category to each transaction
+        for tx in transactions:
+            tx_type = tx.get("type", "Unknown")
+            tx["workflow"] = workflow_mapping.get(tx_type, "other")
+
+        # Filter by workflow if specified
+        if workflow:
+            transactions = [tx for tx in transactions if tx.get("workflow") == workflow]
+
+        # Calculate fees by transaction type
+        fees_by_type = {}
+        for tx in transactions:
+            tx_type = tx.get("type", "Unknown")
+            gas_fee = tx.get("gas_fee", 0)
+            if tx_type not in fees_by_type:
+                fees_by_type[tx_type] = {
+                    "count": 0,
+                    "total_gas_fee": 0,
+                    "average_gas_fee": 0
+                }
+            fees_by_type[tx_type]["count"] += 1
+            fees_by_type[tx_type]["total_gas_fee"] += gas_fee
+
+        # Calculate fees by workflow
+        fees_by_workflow = {
+            "storing": {"count": 0, "total_gas_fee": 0, "average_gas_fee": 0},
+            "sharing": {"count": 0, "total_gas_fee": 0, "average_gas_fee": 0},
+            "purchasing": {"count": 0, "total_gas_fee": 0, "average_gas_fee": 0},
+            "other": {"count": 0, "total_gas_fee": 0, "average_gas_fee": 0}
+        }
+
+        for tx in transactions:
+            workflow_type = tx.get("workflow", "other")
+            gas_fee = tx.get("gas_fee", 0)
+            fees_by_workflow[workflow_type]["count"] += 1
+            fees_by_workflow[workflow_type]["total_gas_fee"] += gas_fee
+
+        # Calculate average gas fee by type
+        for tx_type, data in fees_by_type.items():
+            data["average_gas_fee"] = data["total_gas_fee"] / data["count"] if data["count"] > 0 else 0
+
+        # Calculate average gas fee by workflow
+        for workflow_type, data in fees_by_workflow.items():
+            data["average_gas_fee"] = data["total_gas_fee"] / data["count"] if data["count"] > 0 else 0
+
+        # Calculate additional statistics
+        min_gas_fee = min([tx.get("gas_fee", 0) for tx in transactions]) if transactions else 0
+        max_gas_fee = max([tx.get("gas_fee", 0) for tx in transactions]) if transactions else 0
+        first_tx_time = min([tx.get("timestamp", 0) for tx in transactions]) if transactions else 0
+        last_tx_time = max([tx.get("timestamp", 0) for tx in transactions]) if transactions else 0
+
+        # Create workflow-specific directories if they don't exist
+        for wf in ["storing", "sharing", "purchasing", "other"]:
+            os.makedirs(f"local_storage/{wf}_transactions", exist_ok=True)
+
+        # Return the result with additional statistics
+        return {
+            "total_gas_fees": round(total_gas_fees, 6),
+            "transaction_count": transaction_count,
+            "average_gas_fee": round(average_gas_fee, 6),
+            "fees_by_type": fees_by_type,
+            "fees_by_workflow": fees_by_workflow,
+            "transactions": transactions,
+            "stats": {
+                "min_gas_fee": round(min_gas_fee, 6),
+                "max_gas_fee": round(max_gas_fee, 6),
+                "first_transaction_time": first_tx_time,
+                "last_transaction_time": last_tx_time,
+                "workflow_filter": workflow if workflow else "all",
+                "wallet_address": wallet_address if wallet_address else "all"
+            }
+        }
+    except Exception as e:
+        print(f"Error in get_fees: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/template/{template_cid}")

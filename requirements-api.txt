@@ -5,12 +5,14 @@ pydantic==1.10.7
 requests==2.28.2
 
 # Blockchain
-web3>=6.0.0
+web3==6.0.0
 python-dotenv==1.0.0
 
 # Cryptography
 cryptography==40.0.2
 merkletools==1.0.3
+pysha3==1.0.2
+
 
 # IPFS
 ipfshttpclient==0.8.0a2

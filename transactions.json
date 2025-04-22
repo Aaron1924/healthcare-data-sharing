@@ -1,0 +1,14 @@
+[
+  {
+    "hash": "0xc3df3885a00b773b549c3164f2984f943bab09d3ddfd28b65141a910efbbc566",
+    "from": "0xedb64f85f1fc9357eca100c2970f7f84a5faad4a",
+    "to": "",
+    "value": "0",
+    "function": "Contract Interaction",
+    "timestamp": 1745340562,
+    "gas_used": 2320692,
+    "gas_price": 0.001006325,
+    "status": "Success",
+    "gas_fee": 2.3353703769e-06
+  }
+]

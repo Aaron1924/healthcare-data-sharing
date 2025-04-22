@@ -17,6 +17,7 @@ protobuf>=4.21.6
 # Cryptography
 cryptography==40.0.2
 merkletools==1.0.3
+pysha3==1.0.2
 
 # IPFS
 ipfshttpclient==0.8.0a2
