@@ -38,7 +38,7 @@ services:
       - ipfs
     environment:
       - IPFS_URL=http://ipfs:5001
-      - BASE_RPC_URL=${BASE_RPC_URL:-https://goerli.base.org}
+      - BASE_RPC_URL=${BASE_RPC_URL:-https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf}
       - CONTRACT_ADDRESS=${CONTRACT_ADDRESS:-0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA}
       - PRIVATE_KEY=${PRIVATE_KEY}
       - MCL_LIB_PATH=/usr/local/lib/mcl

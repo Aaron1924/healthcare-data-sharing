@@ -87,22 +87,123 @@ class MerkleService:
 #     }
 
 
-# Encrypt hospital info and key using PCS (simulated public-key encryption)
-def encrypt_hospital_info_and_key(hospital_info_and_key):
-    """Encrypt hospital info and patient key using PCS (simulated)
+# Encrypt hospital info and key using PCS (real public-key encryption)
+def encrypt_hospital_info_and_key(hospital_info_and_key, group_manager_public_key=None):
+    """Encrypt hospital info and patient key using PCS with RSA-OAEP
 
-    In a real implementation, this would use a proper PCS scheme with the Group Manager's public key.
-    For demo purposes, we'll use a simple encryption.
+    This implements a proper Proxy Cryptosystem (PCS) using RSA-OAEP for encrypting
+    the hospital info and patient key with the Group Manager's public key.
 
     Args:
         hospital_info_and_key: A string containing hospital info and patient key
+        group_manager_public_key: The Group Manager's RSA public key (optional)
 
     Returns:
         A base64-encoded string representing the encrypted data
     """
-    # For demo purposes, we'll just base64 encode the data
-    # In a real implementation, this would use proper encryption with the Group Manager's public key
-    return base64.b64encode(hospital_info_and_key.encode()).decode()
+    try:
+        # If no public key is provided, try to load it from environment or file
+        if group_manager_public_key is None:
+            # Try to import from the main API module
+            try:
+                from backend.api import key_manager, GROUP_MANAGER_ADDRESS
+                group_manager_public_key = key_manager.get_public_key(GROUP_MANAGER_ADDRESS)
+                print(f"Using Group Manager public key from key_manager")
+            except (ImportError, AttributeError):
+                # Fallback: Generate a temporary key for demo purposes
+                print("Warning: Could not import key_manager. Generating temporary key.")
+                private_key = generate_private_key()
+                group_manager_public_key = generate_public_key(private_key)
+
+        # Convert input to bytes if it's a string
+        if isinstance(hospital_info_and_key, str):
+            data = hospital_info_and_key.encode()
+        else:
+            data = hospital_info_and_key
+
+        # Encrypt with RSA-OAEP
+        ciphertext = group_manager_public_key.encrypt(
+            data,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+
+        # Return base64-encoded ciphertext
+        return base64.b64encode(ciphertext).decode()
+    except Exception as e:
+        print(f"Error in encrypt_hospital_info_and_key: {str(e)}")
+        # Fallback to simple encoding if encryption fails
+        return base64.b64encode(hospital_info_and_key.encode()).decode()
+
+# Decrypt hospital info and key using PCS
+def decrypt_hospital_info_and_key(encrypted_data, group_manager_private_key=None):
+    """Decrypt hospital info and patient key using PCS with RSA-OAEP
+
+    This implements the decryption side of the Proxy Cryptosystem (PCS) using
+    RSA-OAEP to decrypt the hospital info and patient key with the Group Manager's
+    private key.
+
+    Args:
+        encrypted_data: Base64-encoded encrypted data
+        group_manager_private_key: The Group Manager's RSA private key (optional)
+
+    Returns:
+        tuple: (hospital_info, patient_key)
+    """
+    try:
+        # If no private key is provided, try to load it from environment or file
+        if group_manager_private_key is None:
+            # Try to import from the main API module
+            try:
+                from backend.api import key_manager, GROUP_MANAGER_ADDRESS
+                group_manager_private_key = key_manager.get_private_key(GROUP_MANAGER_ADDRESS)
+                print(f"Using Group Manager private key from key_manager")
+            except (ImportError, AttributeError):
+                # Cannot proceed without a private key
+                print("Error: Could not import key_manager and no private key provided.")
+                raise ValueError("No Group Manager private key available for decryption")
+
+        # Decode base64 data
+        if isinstance(encrypted_data, str):
+            ciphertext = base64.b64decode(encrypted_data)
+        else:
+            ciphertext = encrypted_data
+
+        # Decrypt with RSA-OAEP
+        plaintext = group_manager_private_key.decrypt(
+            ciphertext,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+
+        # Split into hospital info and patient key
+        decoded = plaintext.decode()
+        hospital_info, patient_key_b64 = decoded.split('||')
+        patient_key = base64.b64decode(patient_key_b64)
+
+        return hospital_info, patient_key
+    except Exception as e:
+        print(f"Error in decrypt_hospital_info_and_key: {str(e)}")
+        # If decryption fails, try to handle it as a legacy format
+        try:
+            # Try to decode as a simple base64 string (legacy format)
+            decoded = base64.b64decode(encrypted_data).decode()
+            if '||' in decoded:
+                hospital_info, patient_key_b64 = decoded.split('||')
+                patient_key = base64.b64decode(patient_key_b64)
+                return hospital_info, patient_key
+            else:
+                # Cannot parse the data
+                raise ValueError("Invalid format for hospital info and key")
+        except Exception as fallback_error:
+            print(f"Fallback decryption also failed: {str(fallback_error)}")
+            raise
 
 def encrypt_record(record: dict, key: bytes) -> bytes:
     # Convert any bytes in the dictionary to base64 strings

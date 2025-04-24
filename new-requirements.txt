@@ -1,0 +1,48 @@
+# Web UI
+streamlit>=1.25.0
+streamlit-components-v1>=1.0.0
+
+# API
+fastapi==0.95.1
+uvicorn==0.22.0
+pydantic==1.10.7
+requests==2.28.2
+
+# Blockchain
+web3==6.0.0
+python-dotenv==1.0.0
+eth-account>=0.8.0
+eth-utils>=2.1.0
+eth-abi>=4.0.0
+eth-typing>=3.3.0
+hexbytes>=0.3.0
+
+# Cryptography
+cryptography==40.0.2
+merkletools==1.0.3
+pysha3==1.0.2
+
+# IPFS
+ipfshttpclient==0.8.0a2
+
+# Networking and async
+aiohttp>=3.8.4
+asyncio>=3.4.3
+
+# Data handling
+protobuf>=4.21.6  # Explicitly set to resolve conflicts
+
+# Optional dependencies
+# cdp-sdk is optional for Coinbase Cloud features
+# Uncomment if needed
+# cdp-sdk>=0.1.0
+
+# Development dependencies
+pytest>=7.3.1
+black>=23.3.0
+flake8>=6.0.0
+
+# Additional utilities
+aiohttp-retry>=2.8.3
+base58>=2.1.1
+typing-extensions>=4.5.0

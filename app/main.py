@@ -271,6 +271,67 @@ TEST_ACCOUNTS = {
     }
 }
 
+# Function to track a transaction in the session state
+def track_transaction(tx_hash, operation, wallet_address, gas_used=None, gas_price=None):
+    """Track a transaction in the session state for gas fee analysis
+
+    Args:
+        tx_hash: The transaction hash
+        operation: The operation type (e.g., "Store Record")
+        wallet_address: The wallet address that initiated the transaction
+        gas_used: The gas used by the transaction (if known)
+        gas_price: The gas price used for the transaction (if known)
+    """
+    if 'gas_fees' not in st.session_state:
+        st.session_state.gas_fees = []
+
+    # Create a transaction record
+    tx_record = {
+        "tx_hash": tx_hash,
+        "operation": operation,
+        "wallet_address": wallet_address,
+        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+        "explorer_link": f"https://sepolia.basescan.org/tx/{tx_hash}"
+    }
+
+    # Add gas information if available
+    if gas_used is not None:
+        tx_record["gas_used"] = gas_used
+
+    if gas_price is not None:
+        tx_record["gas_price"] = gas_price
+        if gas_used is not None:
+            # Calculate the cost in ETH
+            from web3 import Web3
+            cost_wei = gas_used * gas_price
+            cost_eth = Web3.from_wei(cost_wei, 'ether')
+            tx_record["cost_eth"] = cost_eth
+
+    # Add to session state
+    st.session_state.gas_fees.append(tx_record)
+
+    # Log to transaction_log.txt as well
+    try:
+        with open('transaction_log.txt', 'a') as log_file:
+            log_file.write(f"\nTimestamp: {tx_record['timestamp']}")
+            log_file.write(f"\nTransaction: {tx_hash}")
+            log_file.write(f"\nExplorer Link: {tx_record['explorer_link']}")
+            log_file.write(f"\nOperation: {operation}")
+            log_file.write(f"\nWallet: {wallet_address}")
+            if gas_used is not None:
+                log_file.write(f"\nGas Used: {gas_used}")
+            if gas_price is not None:
+                from web3 import Web3
+                log_file.write(f"\nGas Price: {Web3.from_wei(gas_price, 'gwei')} Gwei")
+            if gas_used is not None and gas_price is not None:
+                from web3 import Web3
+                cost_wei = gas_used * gas_price
+                cost_eth = Web3.from_wei(cost_wei, 'ether')
+                log_file.write(f"\nCost: {cost_eth} ETH")
+            log_file.write(f"\n-----------------------------------")
+    except Exception as e:
+        print(f"Error writing to transaction log: {str(e)}")
+
 # Function to generate the gas fees tab for any role
 def render_gas_fees_tab(wallet_address):
     """Render the gas fees tab with all its components
@@ -279,6 +340,103 @@ def render_gas_fees_tab(wallet_address):
         wallet_address: The wallet address to get gas fees for
     """
     st.header("Gas Fees and Transaction Costs")
+
+    # Initialize gas fees tracking if not already done
+    if 'gas_fees' not in st.session_state:
+        st.session_state.gas_fees = []
+
+    # Display gas fees tracking
+    if st.session_state.gas_fees:
+        # Create a DataFrame from the gas fees
+        import pandas as pd
+        df = pd.DataFrame(st.session_state.gas_fees)
+
+        # Display the DataFrame
+        st.subheader("Transaction History")
+        st.dataframe(df, use_container_width=True)
+
+        # Add export functionality
+        if st.button("Export Gas Fees to CSV"):
+            # Convert DataFrame to CSV
+            csv = df.to_csv(index=False)
+            # Create a download button
+            st.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name="gas_fees.csv",
+                mime="text/csv"
+            )
+
+        # Add links to transactions
+        st.subheader("Transaction Links")
+        for i, tx in enumerate(st.session_state.gas_fees):
+            if 'tx_hash' in tx:
+                st.markdown(f"[{tx.get('operation', 'Transaction')} - {tx.get('timestamp', '')}](https://sepolia.basescan.org/tx/{tx['tx_hash']})")
+    else:
+        st.info("No gas fees tracked yet. They will appear here after you create records or perform other blockchain transactions.")
+
+    # Add a button to fetch real-time gas prices
+    if st.button("Fetch Current Gas Prices", key="fetch_gas_prices"):
+        try:
+            # Initialize web3 connection to BASE Sepolia
+            from web3 import Web3
+            import requests
+
+            # Connect to BASE Sepolia
+            w3 = Web3(Web3.HTTPProvider("https://sepolia.base.org"))
+
+            if w3.is_connected():
+                # Get current gas price
+                gas_price = w3.eth.gas_price
+                gas_price_gwei = w3.from_wei(gas_price, 'gwei')
+
+                # Get ETH price in USD
+                try:
+                    # Use CoinGecko API to get ETH price
+                    response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd")
+                    eth_price = response.json()["ethereum"]["usd"]
+                except:
+                    eth_price = 3000  # Fallback price if API fails
+
+                # Display gas prices
+                st.success(f"Current BASE Sepolia Gas Price: {gas_price_gwei:.2f} Gwei")
+
+                # Calculate costs for different operations
+                operations = {
+                    "Store Record": 100000,  # Estimated gas used
+                    "Share Record": 50000,
+                    "Purchase Request": 80000,
+                    "Finalize Purchase": 120000,
+                    "Reply to Request": 60000
+                }
+
+                # Create a table of costs
+                cost_data = []
+                for op, gas in operations.items():
+                    cost_wei = gas * gas_price
+                    cost_eth = w3.from_wei(cost_wei, 'ether')
+                    cost_usd = cost_eth * eth_price
+                    cost_data.append({
+                        "Operation": op,
+                        "Gas Used (est.)": gas,
+                        "Cost (ETH)": f"{cost_eth:.6f}",
+                        "Cost (USD)": f"${cost_usd:.2f}"
+                    })
+
+                # Display as DataFrame
+                cost_df = pd.DataFrame(cost_data)
+                st.subheader("Estimated Transaction Costs")
+                st.dataframe(cost_df, use_container_width=True)
+            else:
+                st.error("Could not connect to BASE Sepolia network")
+        except Exception as e:
+            st.error(f"Error fetching gas prices: {str(e)}")
+
+    # Add a button to clear gas fees history
+    if st.session_state.gas_fees and st.button("Clear Gas Fees History", key="clear_gas_fees"):
+        st.session_state.gas_fees = []
+        st.success("Gas fees history cleared!")
+        st.rerun()
 
     # Add real-time gas price information from BASE Sepolia
     st.subheader("Real-Time BASE Sepolia Gas Prices")
@@ -2435,6 +2593,15 @@ else:
                                 result = response.json()
                                 st.success("Purchase finalized successfully!")
 
+                                # Track the transaction in the session state
+                                track_transaction(
+                                    tx_hash=result.get('transaction_hash'),
+                                    operation='Finalize Purchase',
+                                    wallet_address=st.session_state.wallet_address,
+                                    gas_used=120000,  # Estimated gas used
+                                    gas_price=None  # We don't know the gas price in this simulation
+                                )
+
                                 # Display transaction details
                                 st.markdown(f"**Transaction Hash:** `{result.get('transaction_hash', 'N/A')}`")
                                 st.markdown(f"**Message:** {result.get('message', 'Payment has been distributed.')}")
@@ -2485,6 +2652,15 @@ else:
                             if response.status_code == 200:
                                 result = response.json()
                                 st.success("Purchase rejected.")
+
+                                # Track the transaction in the session state
+                                track_transaction(
+                                    tx_hash=result.get('transaction_hash'),
+                                    operation='Reject Purchase',
+                                    wallet_address=st.session_state.wallet_address,
+                                    gas_used=100000,  # Estimated gas used
+                                    gas_price=None  # We don't know the gas price in this simulation
+                                )
 
                                 # Display transaction details
                                 st.markdown(f"**Transaction Hash:** `{result.get('transaction_hash', 'N/A')}`")
@@ -2553,6 +2729,10 @@ else:
 
         # Tabs for different actions
         tab1, tab2, tab3 = st.tabs(["Create Records", "Shared Records", "Gas Fees"])
+
+        # Initialize gas fees tracking if not already done
+        if 'gas_fees' not in st.session_state:
+            st.session_state.gas_fees = []
 
         with tab1:
             st.header("Create Patient Records")
@@ -2635,8 +2815,22 @@ else:
                             with st.spinner("Signing record with group signature..."):
                                 response = requests.post(
                                     f"{API_URL}/records/sign",
-                                    json=record_data
+                                    json={
+                                        "record_data": record_data,
+                                        "wallet_address": st.session_state.wallet_address
+                                    }
                                 )
+
+                                # If the first URL fails, try the alternative URL
+                                if response.status_code == 404:
+                                    print("Trying alternative API URL...")
+                                    response = requests.post(
+                                        f"{API_URL}/api/records/sign",
+                                        json={
+                                            "record_data": record_data,
+                                            "wallet_address": st.session_state.wallet_address
+                                        }
+                                    )
 
                                 if response.status_code == 200:
                                     signed_data = response.json()
@@ -2655,6 +2849,7 @@ else:
                                     with st.spinner("Encrypting with patient's key and uploading to IPFS..."):
                                         # In a real app, we would get the patient's public key from a key server
                                         # For this demo, we'll use a simulated patient key
+                                        # Store the record in IPFS and call the blockchain contract
                                         store_response = requests.post(
                                             f"{API_URL}/records/store",
                                             json={
@@ -2666,8 +2861,25 @@ else:
                                             }
                                         )
 
+                                        # Process response
                                         if store_response.status_code == 200:
                                             store_result = store_response.json()
+
+                                            # Display blockchain transaction information
+                                            if 'txHash' in store_result:
+                                                st.success(f"Record metadata stored on blockchain with transaction: {store_result['txHash']}")
+                                                # Add a link to the BASE Sepolia block explorer
+                                                st.markdown(f"[View transaction on BASE Sepolia Explorer](https://sepolia.basescan.org/tx/{store_result['txHash']})")
+
+                                                # Track the transaction in the session state
+                                                track_transaction(
+                                                    tx_hash=store_result['txHash'],
+                                                    operation='Store Record',
+                                                    wallet_address=st.session_state.wallet_address,
+                                                    gas_used=store_result.get('gasUsed'),
+                                                    gas_price=store_result.get('gasPrice')
+                                                )
+
                                             st.success("Record encrypted and stored on IPFS!")
 
                                             # Display IPFS and blockchain details
@@ -2675,13 +2887,11 @@ else:
                                             st.markdown(f"**Transaction Hash:** `{store_result.get('txHash', 'N/A')}`")
 
                                             # Create a certificate (CERT) for the patient
+                                            # CERT contains only eId and signature as per the modified workflow
                                             cert = {
                                                 "cid": store_result['cid'],
-                                                "merkleRoot": signed_data['merkleRoot'],  # IDRecord
-                                                "signature": signed_data['signature'],     # Signed(IDRecord)
                                                 "eId": store_result.get('eId', 'PCS_encrypted_hospital_info_and_key'),  # PCS(HospitalInfo||K_patient)
-                                                "doctorId": st.session_state.wallet_address,
-                                                "timestamp": int(time.time())
+                                                "signature": signed_data['signature']      # GroupSig.Sign(IDrec)
                                             }
 
                                             # Display the certificate
@@ -2691,11 +2901,15 @@ else:
                                             # Explain the certificate components
                                             st.markdown("**Certificate Components:**")
                                             st.markdown("- **cid**: IPFS content identifier for the encrypted record")
-                                            st.markdown("- **merkleRoot**: IDRecord (Merkle root hash of the record)")
-                                            st.markdown("- **signature**: Group signature on the IDRecord")
-                                            st.markdown("- **eId**: PCS-encrypted hospital info and patient key")
-                                            st.markdown("- **doctorId**: Doctor's wallet address")
-                                            st.markdown("- **timestamp**: When the record was created")
+                                            st.markdown("- **eId**: PCS-encrypted hospital info and patient key using Group Manager's public key")
+                                            st.markdown("- **signature**: Group signature on the IDRecord (Merkle root hash)")
+
+                                            # Explain the blockchain interaction
+                                            st.markdown("\n**Blockchain Interaction:**")
+                                            st.markdown("The doctor has called the smart contract to store the record metadata on the blockchain:")
+                                            st.markdown("- **CID**: The IPFS content identifier")
+                                            st.markdown("- **Merkle Root**: The hash of the record data")
+                                            st.markdown("- **Signature**: The group signature proving authenticity")
 
                                             cert_json = json.dumps(cert, indent=2)
                                             st.code(cert_json)
@@ -3195,6 +3409,15 @@ else:
                                         st.success("Confirmation submitted successfully!")
                                         st.markdown(f"**Transaction Hash:** {result.get('transaction_hash', 'N/A')[:10]}...{result.get('transaction_hash', 'N/A')[-6:]}")
 
+                                        # Track the transaction in the session state
+                                        track_transaction(
+                                            tx_hash=result.get('transaction_hash'),
+                                            operation='Reply to Request',
+                                            wallet_address=st.session_state.wallet_address,
+                                            gas_used=60000,  # Estimated gas used
+                                            gas_price=None  # We don't know the gas price in this simulation
+                                        )
+
                                         # Store the transaction in session state if available
                                         if "transaction" in result:
                                             if "transaction_history" not in st.session_state:
@@ -3270,6 +3493,15 @@ else:
                                     result = response.json()
                                     st.success("Confirmation submitted successfully!")
                                     st.markdown(f"**Transaction Hash:** {result.get('transaction_hash', 'N/A')[:10]}...{result.get('transaction_hash', 'N/A')[-6:]}")
+
+                                    # Track the transaction in the session state
+                                    track_transaction(
+                                        tx_hash=result.get('transaction_hash'),
+                                        operation='Reply to Request',
+                                        wallet_address=st.session_state.wallet_address,
+                                        gas_used=60000,  # Estimated gas used
+                                        gas_price=None  # We don't know the gas price in this simulation
+                                    )
 
                                     # Store the transaction in session state if available
                                     if "transaction" in result:
@@ -3422,6 +3654,15 @@ else:
 
                             # Store the request ID in session state for later use
                             st.session_state.current_request_id = result['request_id']
+
+                            # Track the transaction in the session state
+                            track_transaction(
+                                tx_hash=result['transaction_hash'],
+                                operation='Purchase Request',
+                                wallet_address=st.session_state.wallet_address,
+                                gas_used=80000,  # Estimated gas used
+                                gas_price=None  # We don't know the gas price in this simulation
+                            )
 
                             # Provide instructions for the next steps
                             st.info("Your request has been submitted. The hospital will review your request and respond with a template package if data matching your criteria is available.")
@@ -4416,6 +4657,15 @@ else:
                             if response.status_code == 200:
                                 result = response.json()
                                 st.success("Purchase finalized successfully!")
+
+                                # Track the transaction in the session state
+                                track_transaction(
+                                    tx_hash=result.get('transaction_hash'),
+                                    operation='Finalize Purchase',
+                                    wallet_address=st.session_state.wallet_address,
+                                    gas_used=120000,  # Estimated gas used
+                                    gas_price=None  # We don't know the gas price in this simulation
+                                )
 
                                 # Add transaction from the result if available
                                 if "transaction" in result:

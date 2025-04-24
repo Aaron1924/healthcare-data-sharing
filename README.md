@@ -54,7 +54,7 @@ docker-compose up
 pip install -r requirements.txt
 
 # Start IPFS daemon
-docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4001:4001 -p 8080:8080 -p 5001:5001 ipfs/kubo
+ipfs daemon
 
 # Start the backend server
 python -m uvicorn backend.api:app --host 0.0.0.0 --port 8000
@@ -124,6 +124,10 @@ The application uses IPFS for storing encrypted medical records. You can run IPF
 ```bash
 # Pull the IPFS Docker image
 docker pull ipfs/kubo
+
+docker volume create ipfs-data
+docker volume create ipfs-staging
+
 
 # Run IPFS in a Docker container
 docker run -d --name ipfs-node -v ipfs-data:/data/ipfs -p 4001:4001 -p 8080:8080 -p 5001:5001 ipfs/kubo

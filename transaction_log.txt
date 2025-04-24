@@ -1,0 +1,112 @@
+
+Timestamp: 2025-04-23 05:40:15
+Simulated Transaction: 5183e99a67867de42318761c26bc4299163713878f28d672deb8ef8d8abc9c5d
+Operation: storeData (simulated)
+-----------------------------------
+Timestamp: 2025-04-23 05:46:14
+Simulated Transaction: 6ca0ebe316130317bce7a1878b101ad25930a00156c0ae4c3e26bad806c51659
+Operation: storeData (simulated)
+-----------------------------------
+Timestamp: 2025-04-23 05:51:02
+Transaction Error: 0xd05c6cc749e5bd1031872ba5820c2d72197bc84429aa416bdb35ba5dac624b72
+Error: Transaction HexBytes('0xd05c6cc749e5bd1031872ba5820c2d72197bc84429aa416bdb35ba5dac624b72') is not in the chain after 60 seconds
+-----------------------------------
+Timestamp: 2025-04-23 06:01:25
+Transaction Error: 0x79147f7ee926c17ba5f48518d4081dc5a8f702e83fb96d17f12390d29e5ae042
+Error: Transaction HexBytes('0x79147f7ee926c17ba5f48518d4081dc5a8f702e83fb96d17f12390d29e5ae042') is not in the chain after 60 seconds
+-----------------------------------
+Timestamp: 2025-04-23 06:10:30
+Transaction Error: 0xfe2112b3d3a222d27b37a08eee9958a8d9e268ea6d7d2ecb342947654758d576
+Error: Transaction HexBytes('0xfe2112b3d3a222d27b37a08eee9958a8d9e268ea6d7d2ecb342947654758d576') is not in the chain after 60 seconds
+-----------------------------------
+Timestamp: 2025-04-23 06:16:01
+Transaction Error: 0x68c236bcdac873828a4846ce67f141ef18fe1d7520c966e9f55f089928d1021e
+Error: Transaction HexBytes('0x68c236bcdac873828a4846ce67f141ef18fe1d7520c966e9f55f089928d1021e') is not in the chain after 60 seconds
+-----------------------------------
+Timestamp: 2025-04-23 06:23:17
+Transaction Error: 0x393d777c51de6f553e81bbfd87e63a6544dff54c79bb166da58da2bc39ac63ad
+Error: Transaction HexBytes('0x393d777c51de6f553e81bbfd87e63a6544dff54c79bb166da58da2bc39ac63ad') is not in the chain after 60 seconds
+-----------------------------------
+Timestamp: 2025-04-23 06:24:20
+Transaction Error: 0xc8d86b277ad3b21caf693d9421dddcdf9335c0744c0dd3bcf4d5ca9106202e77
+Error: Transaction HexBytes('0xc8d86b277ad3b21caf693d9421dddcdf9335c0744c0dd3bcf4d5ca9106202e77') is not in the chain after 60 seconds
+-----------------------------------
+Timestamp: 2025-04-23 06:38:59
+Simulated Transaction: 279b8b7272e38607cdf7ee990113f4636b80ebbad0de6eea37032e352270141b
+Operation: storeData (simulated)
+Nonce: 13527
+Status: Simulated (not sent to blockchain)
+Gas Price: 0.002001812 Gwei
+Estimated Gas: 200000
+Estimated Cost: 4.003624E-7 ETH
+-----------------------------------
+Timestamp: 2025-04-23 06:38:59
+Transaction: 279b8b7272e38607cdf7ee990113f4636b80ebbad0de6eea37032e352270141b
+Explorer Link: https://sepolia.basescan.org/tx/279b8b7272e38607cdf7ee990113f4636b80ebbad0de6eea37032e352270141b
+Operation: Store Record
+Wallet: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+Gas Price: 0.002001812 Gwei
+-----------------------------------
+Timestamp: 2025-04-23 06:44:17
+Transaction: 0x99a4be95ab2ecfb03b7225df5c45ce3c5c39083fa9aae67a6f7b89cc28b77f90
+Explorer Link: https://sepolia.basescan.org/tx/0x99a4be95ab2ecfb03b7225df5c45ce3c5c39083fa9aae67a6f7b89cc28b77f90
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-04-23 06:58:18
+Transaction: 0x7412ca5d352039e37f6df03d8f17c83131c2e701065895a2291eff39f52a95d6
+Explorer Link: https://sepolia.basescan.org/tx/0x7412ca5d352039e37f6df03d8f17c83131c2e701065895a2291eff39f52a95d6
+Operation: Reply to Request
+Wallet: 0x28B317594b44483D24EE8AdCb13A1b148497C6ba
+Gas Used: 60000
+-----------------------------------
+Timestamp: 2025-04-23 07:25:55
+Transaction: 0x0512b2796858075ca38ebce39b7980ec48120ebfe9cdb508c0c35e7131bc397a
+Explorer Link: https://sepolia.basescan.org/tx/0x0512b2796858075ca38ebce39b7980ec48120ebfe9cdb508c0c35e7131bc397a
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-04-23 07:27:13
+Transaction: 0xb6cda9537c1d0141947305bb30215a21af198397f64438bd4add33fdee7e048e
+Explorer Link: https://sepolia.basescan.org/tx/0xb6cda9537c1d0141947305bb30215a21af198397f64438bd4add33fdee7e048e
+Operation: Reply to Request
+Wallet: 0x28B317594b44483D24EE8AdCb13A1b148497C6ba
+Gas Used: 60000
+-----------------------------------
+Timestamp: 2025-04-23 07:35:35
+Transaction: 0x0c40012fdde3bd57720a37ac5c10c7649a44724ec87004ca111e679c9dfb5af4
+Explorer Link: https://sepolia.basescan.org/tx/0x0c40012fdde3bd57720a37ac5c10c7649a44724ec87004ca111e679c9dfb5af4
+Operation: Reply to Request
+Wallet: 0x28B317594b44483D24EE8AdCb13A1b148497C6ba
+Gas Used: 60000
+-----------------------------------
+Timestamp: 2025-04-23 07:41:14
+Transaction: 0xbf48e3952a1a00dc715902e9a5779c208758cc09547d0cad285673a260082c89
+Explorer Link: https://sepolia.basescan.org/tx/0xbf48e3952a1a00dc715902e9a5779c208758cc09547d0cad285673a260082c89
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-04-23 07:41:36
+Transaction: 0x5d3a1dbe385103a25724ddbe99a8741af54955565fbb59a744ccc988787c9f77
+Explorer Link: https://sepolia.basescan.org/tx/0x5d3a1dbe385103a25724ddbe99a8741af54955565fbb59a744ccc988787c9f77
+Operation: Reply to Request
+Wallet: 0x28B317594b44483D24EE8AdCb13A1b148497C6ba
+Gas Used: 60000
+-----------------------------------
+Timestamp: 2025-04-23 07:51:51
+Transaction: 0xbeb97e4afcfa98a98dffa3eac557f2b04438d4fab234d81fa900399100b16647
+Explorer Link: https://sepolia.basescan.org/tx/0xbeb97e4afcfa98a98dffa3eac557f2b04438d4fab234d81fa900399100b16647
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-04-23 07:52:21
+Transaction: 0x733109e10046433194f58eb4084372871988972bdc8b06ef0e1e26bc35d3f62c
+Explorer Link: https://sepolia.basescan.org/tx/0x733109e10046433194f58eb4084372871988972bdc8b06ef0e1e26bc35d3f62c
+Operation: Reply to Request
+Wallet: 0x28B317594b44483D24EE8AdCb13A1b148497C6ba
+Gas Used: 60000
+-----------------------------------
