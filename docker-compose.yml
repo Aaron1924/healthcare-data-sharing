@@ -42,6 +42,7 @@ services:
       - ./pygroupsig:/app/pygroupsig
       - ./artifacts:/app/artifacts
       - ./local_storage:/app/local_storage
+      - ./test_contract.py:/app/test_contract.py
     depends_on:
       - ipfs
     environment:
