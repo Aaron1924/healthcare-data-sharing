@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     nodejs \
     npm \
     libgmp-dev \
+    libgmp10 \
+    libgmpxx4ldbl \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone and build MCL library
@@ -42,6 +44,10 @@ RUN cd /app && npm install
 
 # Compile the smart contract
 RUN cd /app && npm run compile
+
+# Generate keys for group signature
+RUN mkdir -p /app/keys && \
+    python /app/generate_keys.py
 
 # Expose ports for FastAPI and Streamlit
 EXPOSE 8000 8501

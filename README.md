@@ -155,14 +155,80 @@ When testing with the Base Sepolia testnet, be aware of these limitations:
 
 ### Testing MCL and Group Signatures
 
+The MCL library is required for the group signature functionality. The Docker container is configured to build and install the MCL library automatically.
+
+#### MCL Library Dependencies
+
+The MCL library requires the following dependencies:
+- libgmp-dev
+- libgmp10
+- libgmpxx4ldbl
+
+These are installed automatically in the Docker container.
+
+#### Group Signature Keys
+
+The group signature keys are generated automatically when the Docker container is built. The keys are stored in the `/app/keys` directory inside the container.
+
 To verify that the MCL library and pygroupsig are working correctly:
 
 ```bash
-# Run the MCL test script
+# Make the test script executable
+chmod +x test_mcl_in_container.sh
+
+# Run the test script
+./test_mcl_in_container.sh
+```
+
+This will:
+1. Ensure the Docker containers are running
+2. Run the MCL test script inside the container
+3. Run the group signature test script inside the container
+
+Alternatively, you can run the tests directly:
+
+```bash
+# Test MCL library
 docker-compose exec api python /app/test_mcl.py
+
+# Test group signatures
+docker-compose exec api python /app/test.py
 ```
 
 ## Troubleshooting
+
+### MCL Library and Group Signatures
+
+If you encounter issues with the MCL library or group signatures:
+
+1. **Check MCL_LIB_PATH**: Make sure the MCL_LIB_PATH environment variable is set correctly in the container:
+   ```bash
+   docker-compose exec api env | grep MCL_LIB_PATH
+   ```
+   It should be set to `/usr/local/lib/mcl`.
+
+2. **Check MCL library files**: Verify that the MCL library files exist in the container:
+   ```bash
+   docker-compose exec api ls -la /usr/local/lib/mcl
+   ```
+   You should see `libmcl.so` and `libmclbn384_256.so`.
+
+3. **Rebuild the container**: If the MCL library is missing or not working, try rebuilding the container:
+   ```bash
+   docker-compose down
+   docker-compose build --no-cache
+   docker-compose up -d
+   ```
+
+4. **Generate keys manually**: If the group signature keys are missing, you can generate them manually:
+   ```bash
+   docker-compose exec api python /app/generate_keys.py
+   ```
+
+5. **Check for GMP dependencies**: The MCL library requires GMP dependencies. Make sure they are installed:
+   ```bash
+   docker-compose exec api apt-get update && apt-get install -y libgmp-dev libgmp10 libgmpxx4ldbl
+   ```
 
 ### Docker Permission Issues
 
