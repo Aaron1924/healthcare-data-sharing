@@ -36,17 +36,37 @@ class GroupSignatureManager:
             with open("keys/group_manager_key.json", "r") as f:
                 gm_key = json.load(f)
                 # Convert string representations back to the appropriate type
-                # Note: In a real implementation, we would need to handle this conversion properly
-                # For demo purposes, we'll use placeholder values
-                self.g.manager_key.xi1 = gm_key["xi1"]
-                self.g.manager_key.xi2 = gm_key["xi2"]
-                self.g.manager_key.gamma = gm_key["gamma"]
+                from pygroupsig.utils.mcl import Fr
+
+                # Create new Fr objects and set them from the string values
+                xi1 = Fr()
+                xi1.set_str(gm_key["xi1"])
+                self.g.manager_key.xi1.set_object(xi1)
+
+                xi2 = Fr()
+                xi2.set_str(gm_key["xi2"])
+                self.g.manager_key.xi2.set_object(xi2)
+
+                gamma = Fr()
+                gamma.set_str(gm_key["gamma"])
+                self.g.manager_key.gamma.set_object(gamma)
+
+                print("Successfully loaded group manager key")
 
             # Load revocation manager's secret key
             with open("keys/revocation_manager_key.json", "r") as f:
                 rm_key = json.load(f)
-                self.g.revocation_manager_key.xi1 = rm_key["xi1"]
-                self.g.revocation_manager_key.xi2 = rm_key["xi2"]
+
+                # Create new Fr objects and set them from the string values
+                xi1_rev = Fr()
+                xi1_rev.set_str(rm_key["xi1"])
+                self.g.revocation_manager_key.xi1.set_object(xi1_rev)
+
+                xi2_rev = Fr()
+                xi2_rev.set_str(rm_key["xi2"])
+                self.g.revocation_manager_key.xi2.set_object(xi2_rev)
+
+                print("Successfully loaded revocation manager key")
 
             # Initialize doctor's group instance
             self.gm = group("cpy06")()

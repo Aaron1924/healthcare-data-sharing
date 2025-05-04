@@ -73,6 +73,7 @@ IPFS_URL = os.getenv("IPFS_URL", "/ip4/127.0.0.1/tcp/5001")
 # Try multiple IPFS connection URLs in case one fails
 ipfs_urls = [
     IPFS_URL,
+    "/dns4/ipfs/tcp/5001",
     "/ip4/127.0.0.1/tcp/5001",
     "/ip4/localhost/tcp/5001"
 ]
@@ -80,9 +81,35 @@ ipfs_urls = [
 ipfs_client = None
 for url in ipfs_urls:
     try:
-        ipfs_client = ipfshttpclient.connect(url)
-        print(f"Successfully connected to IPFS at {url}")
-        break
+        # Handle HTTP URLs by converting to multiaddr format
+        if url.startswith("http://"):
+            host = url.replace("http://", "").split(":")[0]
+            port = url.split(":")[-1]
+            if port.endswith("/"):
+                port = port[:-1]
+
+            # Try both DNS and IP formats
+            multiaddr_formats = [
+                f"/dns4/{host}/tcp/{port}",
+                f"/ip4/{host}/tcp/{port}"
+            ]
+
+            for multiaddr in multiaddr_formats:
+                try:
+                    print(f"Trying IPFS connection with converted multiaddr: {multiaddr}")
+                    ipfs_client = ipfshttpclient.connect(multiaddr)
+                    print(f"Successfully connected to IPFS at {multiaddr}")
+                    break
+                except Exception as multi_error:
+                    print(f"Warning: Could not connect to IPFS at {multiaddr}: {multi_error}")
+
+            if ipfs_client:
+                break
+        else:
+            # For multiaddr format
+            ipfs_client = ipfshttpclient.connect(url)
+            print(f"Successfully connected to IPFS at {url}")
+            break
     except Exception as e:
         print(f"Warning: Could not connect to IPFS at {url}: {e}")
 
@@ -964,16 +991,51 @@ def store_on_ipfs(data):
         try:
             # Store on IPFS
             print(f"Storing {len(data)} bytes on IPFS...")
-            result = ipfs_client.add_bytes(data)
-            print(f"IPFS add_bytes result: {result}")
+
+            # Try different methods to add data to IPFS
+            try:
+                # First try add_bytes
+                result = ipfs_client.add_bytes(data)
+                print(f"IPFS add_bytes result: {result}")
+            except Exception as add_bytes_error:
+                print(f"Warning: add_bytes failed: {str(add_bytes_error)}")
+
+                # Try add with files parameter
+                try:
+                    import tempfile
+                    with tempfile.NamedTemporaryFile() as temp:
+                        temp.write(data)
+                        temp.flush()
+                        add_result = ipfs_client.add(temp.name)
+                        result = add_result['Hash']
+                        print(f"IPFS add result: {result}")
+                except Exception as add_error:
+                    print(f"Warning: add failed: {str(add_error)}")
+                    raise  # Re-raise to fall back to local storage
 
             # Handle different return types
             if isinstance(result, dict) and "Hash" in result:
                 cid = result["Hash"]
                 print(f"Successfully stored on IPFS with CID: {cid}")
+
+                # Pin the content to make sure it's not garbage collected
+                try:
+                    ipfs_client.pin.add(cid)
+                    print(f"Pinned content with CID: {cid}")
+                except Exception as pin_error:
+                    print(f"Warning: Could not pin content: {str(pin_error)}")
+
                 return cid
             elif isinstance(result, str):
                 print(f"Successfully stored on IPFS with CID: {result}")
+
+                # Pin the content to make sure it's not garbage collected
+                try:
+                    ipfs_client.pin.add(result)
+                    print(f"Pinned content with CID: {result}")
+                except Exception as pin_error:
+                    print(f"Warning: Could not pin content: {str(pin_error)}")
+
                 return result
             else:
                 print(f"Warning: Unexpected IPFS result format: {result}")
@@ -1124,23 +1186,18 @@ class PurchaseRequest(BaseModel):
 async def sign_record(record_data: dict = Body(...), wallet_address: str = Body(...)):
     """
     Doctor creates and signs a record, which is then returned to be encrypted and stored.
-    The doctor's real identity is protected using pseudonymous identifiers.
     """
     try:
-        # Import the pseudonym module
-        from backend.pseudonym import generate_pseudonym, create_anonymous_record
+        # Check if the wallet address matches the Doctor address
+        if wallet_address == DOCTOR_ADDRESS:
+            print(f"Doctor {wallet_address} is signing a record")
+        else:
+            print(f"Warning: Non-doctor address {wallet_address} is attempting to sign a record")
 
-        # Generate a pseudonymous identity for the doctor
-        doctor_pseudonym = generate_pseudonym(wallet_address)
-        print(f"Generated pseudonym {doctor_pseudonym} for doctor {wallet_address}")
-
-        # Create an anonymized record with the pseudonym
-        anonymized_record = create_anonymous_record(record_data, doctor_pseudonym)
-        print(f"Created anonymized record with pseudonym {doctor_pseudonym}")
-
-        # Create Merkle tree from anonymized record data
+        # Use the original record data without pseudonymization
+        # Create Merkle tree from the record data
         merkle_service = MerkleService()
-        merkle_root, proofs = merkle_service.create_merkle_tree(anonymized_record)
+        merkle_root, proofs = merkle_service.create_merkle_tree(record_data)
 
         # Sign the merkle root with group signature using the doctor's member key
         # The group signature provides cryptographic anonymity
@@ -1152,11 +1209,10 @@ async def sign_record(record_data: dict = Body(...), wallet_address: str = Body(
             signature = hashlib.sha256(f"{merkle_root}_{int(time.time())}".encode()).hexdigest()
 
         return {
-            "record": anonymized_record,  # Return the anonymized record
+            "record": record_data,  # Return the original record
             "merkleRoot": merkle_root,
             "proofs": proofs,
-            "signature": signature,
-            "doctorPseudonym": doctor_pseudonym  # Include the pseudonym for reference
+            "signature": signature
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1972,20 +2028,12 @@ async def share_record(record_cid: str = Body(None), doctor_address: str = Body(
         else:
             print(f"Warning: Non-patient address {wallet_address} is attempting to share a record")
 
-        # Import the pseudonym module
-        from backend.pseudonym import get_pseudonyms, get_real_address
+        # Check if it's a valid doctor address
+        if actual_doctor_address != DOCTOR_ADDRESS:
+            print(f"Warning: Sharing with non-doctor address {actual_doctor_address}")
 
-        # Check if the doctor address is a pseudonym
-        real_doctor_address = get_real_address(actual_doctor_address)
-        if real_doctor_address:
-            print(f"Sharing with doctor pseudonym {actual_doctor_address} (real address: {real_doctor_address})")
-            # Use the real address for key lookup but keep the pseudonym for record metadata
-            actual_doctor_address_for_keys = real_doctor_address
-        else:
-            # Not a pseudonym, check if it's a valid doctor address
-            if actual_doctor_address != DOCTOR_ADDRESS:
-                print(f"Warning: Sharing with non-doctor address {actual_doctor_address}")
-            actual_doctor_address_for_keys = actual_doctor_address
+        # Use the actual doctor address for key lookup
+        actual_doctor_address_for_keys = actual_doctor_address
 
         # 1. Retrieve and decrypt the record
         try:
@@ -2137,14 +2185,12 @@ async def share_record(record_cid: str = Body(None), doctor_address: str = Body(
         current_time = int(time.time())
         sharing_metadata = {
             "patient_address": wallet_address,
-            "doctor_address": actual_doctor_address,  # This could be a pseudonym
+            "doctor_address": actual_doctor_address,
             "record_cid": cid_share,
             "original_cid": actual_record_cid,  # Include the original CID for key generation
             "encrypted_key": encrypted_key.hex() if isinstance(encrypted_key, bytes) else encrypted_key,
             "timestamp": current_time,
             "expiration": current_time + 30*24*60*60,  # 30 days
-            # Flag indicating if this is an anonymized sharing (doctor using pseudonym)
-            "anonymized": real_doctor_address is not None,
             # In a real implementation, this would be signed with the patient's private key
             "signature": f"mock_signature_for_{wallet_address}_{current_time}"
         }
@@ -2613,26 +2659,15 @@ async def access_shared_record(metadata_cid: str = Body(...), wallet_address: st
         else:
             print(f"Warning: Non-doctor address {wallet_address} is attempting to access a shared record")
 
-        # Import the pseudonym module
-        from backend.pseudonym import get_pseudonyms, get_real_address
-
-        # 2. Verify it's intended for this doctor (either directly or via pseudonym)
+        # 2. Verify it's intended for this doctor
         doctor_address_in_metadata = sharing_metadata["doctor_address"]
 
-        # Check if the doctor is using a pseudonym
-        real_doctor_address = get_real_address(doctor_address_in_metadata)
-
-        # Check if the wallet address matches either the pseudonym's real address or the direct address
-        if (real_doctor_address and real_doctor_address == wallet_address) or doctor_address_in_metadata == wallet_address:
+        # Check if the wallet address matches the doctor address in the metadata
+        if doctor_address_in_metadata == wallet_address:
             print(f"Doctor {wallet_address} authorized to access record")
         else:
-            # Check if the wallet address has pseudonyms that match
-            doctor_pseudonyms = get_pseudonyms(wallet_address)
-            if doctor_address_in_metadata in doctor_pseudonyms:
-                print(f"Doctor {wallet_address} authorized via pseudonym {doctor_address_in_metadata}")
-            else:
-                print(f"Doctor {wallet_address} not authorized to access record for {doctor_address_in_metadata}")
-                raise HTTPException(status_code=403, detail="Not authorized to access this record")
+            print(f"Doctor {wallet_address} not authorized to access record for {doctor_address_in_metadata}")
+            raise HTTPException(status_code=403, detail="Not authorized to access this record")
 
         # 3. Verify it hasn't expired
         current_time = int(time.time())
@@ -2699,17 +2734,8 @@ async def access_shared_record(metadata_cid: str = Body(...), wallet_address: st
                         if isinstance(encrypted_key, str):
                             encrypted_key = bytes.fromhex(encrypted_key)
 
-                        # Import the pseudonym module
-                        from backend.pseudonym import get_real_address
-
-                        # Check if the wallet address is a pseudonym
-                        real_doctor_address = get_real_address(wallet_address)
-                        if real_doctor_address:
-                            print(f"Doctor using pseudonym {wallet_address} (real address: {real_doctor_address})")
-                            # Use the real address for key lookup
-                            doctor_address_for_keys = real_doctor_address
-                        else:
-                            doctor_address_for_keys = wallet_address
+                        # Use the wallet address directly
+                        doctor_address_for_keys = wallet_address
 
                         # 6.3 Get the doctor's private key from our key manager
                         doctor_private_key = key_manager.get_private_key(doctor_address_for_keys)
