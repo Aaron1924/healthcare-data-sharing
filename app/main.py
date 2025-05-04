@@ -1,4 +1,12 @@
 import streamlit as st
+
+# Set page config first - this must be the first Streamlit command
+st.set_page_config(
+    page_title="Healthcare Data Sharing",
+    page_icon="🏥",
+    layout="wide"
+)
+
 import requests
 import json
 import os
@@ -217,11 +225,7 @@ except (FileNotFoundError, json.JSONDecodeError, KeyError):
 contract = w3.eth.contract(address=w3.to_checksum_address(CONTRACT_ADDRESS), abi=contract_abi)
 
 # Streamlit app
-st.set_page_config(
-    page_title="Healthcare Data Sharing",
-    page_icon="🏥",
-    layout="wide"
-)
+# Page config is already set at the top of the file
 
 # Display Base Sepolia connection status
 if w3.is_connected():

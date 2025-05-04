@@ -10,17 +10,25 @@ RUN apt-get update && apt-get install -y \
     curl \
     nodejs \
     npm \
+    libgmp-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone and build MCL library
 RUN git clone https://github.com/herumi/mcl.git && \
     cd mcl && \
-    cmake -B build . && \
-    make -C build && \
-    cd ..
+    mkdir -p build && \
+    cd build && \
+    cmake .. && \
+    make && \
+    cd ../..
 
 # Set MCL_LIB_PATH environment variable
-ENV MCL_LIB_PATH=/app/mcl/build/lib
+ENV MCL_LIB_PATH=/usr/local/lib/mcl
+
+# Create directory and symlink for MCL library
+RUN mkdir -p /usr/local/lib/mcl && \
+    cp -r /app/mcl/build/lib/* /usr/local/lib/mcl/ && \
+    ldconfig
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
@@ -41,5 +49,5 @@ EXPOSE 8000 8501
 # Set environment variables
 ENV PYTHONPATH=/app
 
-# Command to run when the container starts
-CMD ["sh", "-c", "python -m uvicorn backend.api:app --host 0.0.0.0 --port 8000 & streamlit run app/main.py"]
+# Command will be overridden by docker-compose
+CMD ["echo", "This command will be overridden by docker-compose"]
