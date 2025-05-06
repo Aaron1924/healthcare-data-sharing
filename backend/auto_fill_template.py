@@ -147,30 +147,61 @@ def upload_to_ipfs(data: Dict[str, Any]) -> str:
         # Try to connect to IPFS
         ipfs_client = ipfshttpclient.connect('/ip4/127.0.0.1/tcp/5001/http')
 
-        # Convert data to JSON string
-        json_data = json.dumps(data)
+        # Convert data to JSON string if it's not already bytes
+        if not isinstance(data, bytes):
+            if isinstance(data, dict):
+                data = json.dumps(data).encode()
+            else:
+                data = str(data).encode()
 
         # Add to IPFS
-        result = ipfs_client.add_json(json_data)
+        result = ipfs_client.add_bytes(data)
+        cid = result['Hash']
+        print(f"Successfully uploaded to IPFS with CID: {cid}")
+
+        # Pin the content to ensure it stays in IPFS
+        try:
+            ipfs_client.pin.add(cid)
+            print(f"Successfully pinned content with CID: {cid}")
+        except Exception as pin_error:
+            print(f"Warning: Failed to pin content: {str(pin_error)}")
 
         # Return the CID
-        return result
+        return cid
     except Exception as e:
         print(f"Error uploading to IPFS: {str(e)}")
 
         # Fallback to local storage
-        cid = hashlib.sha256(json.dumps(data).encode()).hexdigest()
+        cid = hashlib.sha256(json.dumps(data).encode()).hexdigest() if not isinstance(data, bytes) else hashlib.sha256(data).hexdigest()
 
         # Save to local storage
         os.makedirs("local_storage", exist_ok=True)
-        with open(f"local_storage/{cid}", "w") as f:
-            json.dump(data, f)
 
+        # Write the data to a file
+        if isinstance(data, bytes):
+            with open(f"local_storage/{cid}", "wb") as f:
+                f.write(data)
+        else:
+            with open(f"local_storage/{cid}", "w") as f:
+                if isinstance(data, dict):
+                    json.dump(data, f)
+                else:
+                    f.write(str(data))
+
+        print(f"Saved to local storage with CID: {cid}")
         return cid
 
 def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_key: Optional[bytes] = None) -> Optional[Dict[str, Any]]:
     """
-    Automatically fill a template for Patient 1 following the secure workflow.
+    Automatically fill a template for a patient following the secure workflow.
+
+    This function implements the real template processing workflow:
+    1. Retrieve patient records that match the template criteria
+    2. Create a Merkle tree from the record data
+    3. Sign the Merkle root with a group signature
+    4. Encrypt the filled template with a temporary key
+    5. Encrypt the temporary key with the buyer's public key
+    6. Upload the encrypted template and CERT to IPFS
 
     Args:
         request_id: The purchase request ID
@@ -183,9 +214,13 @@ def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_k
     try:
         print(f"Auto-filling template for request {request_id}")
 
-        # Get Patient 1's records
-        records = get_patient_records(PATIENT_1_ADDRESS)
-        print(f"Found {len(records)} records for Patient 1")
+        # Get the patient address from the template or use the default
+        patient_address = template.get("patient_address", PATIENT_1_ADDRESS)
+        print(f"Processing template for patient: {patient_address}")
+
+        # Get patient's records
+        records = get_patient_records(patient_address)
+        print(f"Found {len(records)} records for patient {patient_address}")
 
         # Filter records based on template
         filtered_records = filter_records_by_template(records, template)
@@ -197,15 +232,16 @@ def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_k
             print(f"Not enough records: found {len(filtered_records)}, need {min_records}")
             return None
 
-        # For demo purposes, just use the first matching record
-        selected_record = filtered_records[0]
-        print(f"Selected record: {selected_record.get('cid', 'No CID')}")
+        # Process all matching records (up to a reasonable limit)
+        max_records = min(len(filtered_records), template.get("max_records", 10))
+        selected_records = filtered_records[:max_records]
+        print(f"Selected {len(selected_records)} records for processing")
 
-        # Create a filled template with just the selected record
+        # Create a filled template with the selected records
         filled_template = {
             "template": template,
-            "record": selected_record,
-            "patient_address": PATIENT_1_ADDRESS,
+            "records": selected_records,
+            "patient_address": patient_address,
             "timestamp": int(time.time()),
             "request_id": request_id
         }
@@ -215,34 +251,47 @@ def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_k
             # Import MerkleService from backend.data
             from backend.data import MerkleService
             merkle_service = MerkleService()
-            merkle_root, proofs = merkle_service.create_merkle_tree(selected_record)
-            filled_template["merkle_root"] = merkle_root
-            filled_template["merkle_proofs"] = proofs
-            print(f"Created Merkle tree with root: {merkle_root}")
+
+            # Create a Merkle tree for each record
+            merkle_roots = []
+            merkle_proofs = {}
+
+            for i, record in enumerate(selected_records):
+                root, proofs = merkle_service.create_merkle_tree(record)
+                merkle_roots.append(root)
+                merkle_proofs[f"record_{i}"] = proofs
+                print(f"Created Merkle tree for record {i} with root: {root[:20]}...")
+
+            # Create a master Merkle tree from all the record Merkle roots
+            master_root, master_proofs = merkle_service.create_merkle_tree({"roots": merkle_roots})
+            filled_template["merkle_root"] = master_root
+            filled_template["merkle_proofs"] = merkle_proofs
+            filled_template["master_proofs"] = master_proofs
+            print(f"Created master Merkle tree with root: {master_root[:20]}...")
         except ImportError:
             # Fallback if MerkleService is not available
             print("Warning: MerkleService not available, using hash as Merkle root")
-            merkle_root = hashlib.sha256(json.dumps(selected_record).encode()).hexdigest()
-            filled_template["merkle_root"] = merkle_root
+            master_root = hashlib.sha256(json.dumps(selected_records).encode()).hexdigest()
+            filled_template["merkle_root"] = master_root
             filled_template["merkle_proofs"] = {}
 
-        # Sign the Merkle root with group signature
+        # Sign the master Merkle root with group signature
         try:
             # Import sign_message from backend.groupsig_utils
             from backend.groupsig_utils import sign_message
-            signature = sign_message(merkle_root)
+            signature = sign_message(master_root)
             if signature:
                 filled_template["signature"] = signature
-                print(f"Signed Merkle root with group signature: {signature[:20]}...")
+                print(f"Signed master Merkle root with group signature: {signature[:20]}...")
             else:
                 # Fallback if signing fails
                 print("Warning: Group signature failed, using mock signature")
-                signature = hashlib.sha256(f"{merkle_root}_{int(time.time())}".encode()).hexdigest()
+                signature = hashlib.sha256(f"{master_root}_{int(time.time())}".encode()).hexdigest()
                 filled_template["signature"] = signature
         except ImportError:
             # Fallback if sign_message is not available
             print("Warning: sign_message not available, using mock signature")
-            signature = hashlib.sha256(f"{merkle_root}_{int(time.time())}".encode()).hexdigest()
+            signature = hashlib.sha256(f"{master_root}_{int(time.time())}".encode()).hexdigest()
             filled_template["signature"] = signature
 
         # Generate a temporary key for encrypting the filled template
@@ -258,15 +307,38 @@ def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_k
         except ImportError:
             # Fallback if encrypt_record is not available
             print("Warning: encrypt_record not available, using simple encryption")
-            # Simple encryption for demo purposes
-            nonce = os.urandom(16)
-            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-            from cryptography.hazmat.backends import default_backend
-            cipher = Cipher(algorithms.AES(temp_key), modes.CTR(nonce), backend=default_backend())
-            encryptor = cipher.encryptor()
-            template_json = json.dumps(filled_template).encode()
-            ciphertext = encryptor.update(template_json) + encryptor.finalize()
-            encrypted_template = nonce + ciphertext
+            try:
+                # Try to use cryptography library
+                from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+                from cryptography.hazmat.backends import default_backend
+
+                # Generate a random IV
+                iv = os.urandom(16)
+
+                # Create an encryptor
+                cipher = Cipher(algorithms.AES(temp_key), modes.GCM(iv), backend=default_backend())
+                encryptor = cipher.encryptor()
+
+                # Convert the filled template to JSON
+                plaintext = json.dumps(filled_template).encode()
+
+                # Encrypt the data
+                ciphertext = encryptor.update(plaintext) + encryptor.finalize()
+
+                # Get the tag
+                tag = encryptor.tag
+
+                # Combine IV, ciphertext, and tag
+                encrypted_template = iv + tag + ciphertext
+                print(f"Encrypted filled template with AES-GCM: {len(encrypted_template)} bytes")
+            except ImportError:
+                # Fallback to very simple encryption if cryptography is not available
+                print("Warning: cryptography library not available, using very simple encryption")
+                # Simple XOR encryption for demo purposes only
+                plaintext = json.dumps(filled_template).encode()
+                key_bytes = (temp_key * (len(plaintext) // len(temp_key) + 1))[:len(plaintext)]
+                encrypted_template = bytes([p ^ k for p, k in zip(plaintext, key_bytes)])
+                print(f"Encrypted filled template with simple XOR: {len(encrypted_template)} bytes")
 
         # Encrypt the temporary key with the buyer's public key
         encrypted_temp_key = None
@@ -291,9 +363,11 @@ def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_k
 
         # Create the CERT structure
         cert = {
-            "merkle_root": merkle_root,
+            "merkle_root": master_root,
             "signature": signature,
-            "encrypted_key": encrypted_temp_key
+            "encrypted_key": encrypted_temp_key,
+            "records_count": len(selected_records),
+            "timestamp": int(time.time())
         }
 
         # Upload the CERT to IPFS
@@ -304,10 +378,11 @@ def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_k
         return {
             "template_cid": template_cid,
             "cert_cid": cert_cid,
-            "merkle_root": merkle_root,
+            "merkle_root": master_root,
             "signature": signature,
             "encrypted_key": encrypted_temp_key,
-            "patient_address": PATIENT_1_ADDRESS
+            "patient_address": patient_address,
+            "records_count": len(selected_records)
         }
     except Exception as e:
         print(f"Error auto-filling template: {str(e)}")

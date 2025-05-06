@@ -1,19 +1,23 @@
-# Healthcare Data Sharing Platform
+# Decentralized Healthcare Data Sharing Platform
 
-A blockchain-based platform for secure healthcare data sharing using group signatures and IPFS.
+A blockchain-based platform for secure healthcare data sharing using group signatures and IPFS, deployed on the BASE Sepolia testnet.
 
 ## Features
 
-- Secure storage of healthcare records using IPFS and encryption
-- Group signature-based authentication and privacy
-- Smart contract integration for access control and data sharing
-- Web-based interface for patients, doctors, and healthcare providers
+- **Secure Storage**: Healthcare records are encrypted and stored on IPFS
+- **Privacy-Preserving Authentication**: Group signatures ensure doctor anonymity while maintaining verifiability
+- **Blockchain Integration**: Smart contracts on BASE Sepolia testnet for access control and data sharing
+- **Three Core Workflows**:
+  - **Storing**: Doctors create and sign records, patients store them
+  - **Sharing**: Patients share records with specific doctors
+  - **Purchasing**: Buyers request data that hospitals and patients fulfill
 
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/)
 - [Docker Compose](https://docs.docker.com/compose/install/)
 - [Git](https://git-scm.com/downloads)
+- [BASE Sepolia Testnet ETH](https://www.coinbase.com/faucets/base-sepolia-faucet) (for blockchain transactions)
 
 ## Running the Project with Docker
 
@@ -24,26 +28,29 @@ git clone https://github.com/yourusername/healthcare-data-sharing.git
 cd healthcare-data-sharing
 ```
 
-### 2. Configure Environment Variables (Optional)
+### 2. Configure Environment Variables
 
-The project includes default environment variables in the `.env` file. You can modify these if needed:
+Copy the example environment file and edit it with your settings:
 
 ```bash
-# Edit the .env file if you need to change any settings
+cp .env.example .env
+# Edit the .env file with your preferred editor
 nano .env
 ```
+
+Important variables to configure:
+- `BASE_RPC_URL`: Your BASE Sepolia RPC URL (get from Coinbase Cloud or other providers)
+- `PRIVATE_KEY`: Your wallet's private key for contract deployment
+- Test account private keys (if you want to use different accounts)
 
 ### 3. Build and Start the Docker Containers
 
 ```bash
-# Build the Docker images
-docker-compose build
-
-# Start the containers
-docker-compose up
+# Build and start all containers (web UI, API backend, and IPFS)
+docker-compose up --build
 ```
 
-Alternatively, you can run the containers in detached mode:
+For production or background running:
 
 ```bash
 docker-compose up -d
@@ -53,11 +60,10 @@ docker-compose up -d
 
 - **Web UI**: [http://localhost:8501](http://localhost:8501)
 - **API**: [http://localhost:8000](http://localhost:8000)
+- **API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs)
 - **IPFS Interface**: [http://localhost:8080/webui](http://localhost:8080/webui)
 
 ### 5. Stop the Containers
-
-To stop the running containers:
 
 ```bash
 # If running in the foreground, press Ctrl+C
@@ -65,16 +71,44 @@ To stop the running containers:
 docker-compose down
 ```
 
+### 6. Running Individual Components
+
+If you need to run only specific components:
+
+```bash
+# Run only the IPFS node
+docker-compose up ipfs
+
+# Run only the backend API
+docker-compose up api
+
+# Run only the web UI
+docker-compose up web
+```
+
 ## Project Structure
 
-- `app/`: Streamlit web application
-- `backend/`: FastAPI backend services
-- `pygroupsig/`: Python implementation of group signatures
-- `artifacts/`: Smart contract artifacts
-- `Dockerfile`: Docker configuration for the application
-- `docker-compose.yml`: Docker Compose configuration
+- `app/`: Streamlit web application for the user interface
+- `backend/`: FastAPI backend services for API endpoints and business logic
+- `pygroupsig/`: Python implementation of group signatures for privacy-preserving authentication
+- `artifacts/`: Smart contract artifacts (ABI and bytecode)
+- `contracts/`: Solidity smart contracts for the BASE blockchain
+- `local_storage/`: Local storage for IPFS data and purchase requests
+- `keys/`: Group signature keys for the system
+- `Dockerfile`: Docker configuration for building the application
+- `docker-compose.yml`: Docker Compose configuration for running all components
 
 ## Technical Details
+
+### System Architecture
+
+The system consists of three main components:
+
+1. **Streamlit Web UI**: User interface for patients, doctors, hospitals, and buyers
+2. **FastAPI Backend**: API endpoints for data processing, cryptography, and blockchain interaction
+3. **IPFS Node**: Decentralized storage for healthcare records and metadata
+
+All components are containerized using Docker and can be run together using Docker Compose.
 
 ### MCL Library
 
@@ -88,7 +122,7 @@ The project uses the [MCL library](https://github.com/herumi/mcl) for pairing-ba
 
 The project uses a Python implementation of group signatures (pygroupsig) for privacy-preserving authentication. This allows:
 
-- Patients to sign data without revealing their identity
+- Doctors to sign records without revealing their identity
 - Verification of signatures without identifying the signer
 - Revocation of anonymity when necessary (by authorized entities)
 
@@ -99,6 +133,14 @@ Healthcare data is stored on IPFS (InterPlanetary File System), providing:
 - Decentralized storage
 - Content-addressed data (immutable references)
 - Resilient data availability
+- Encryption for privacy
+
+### Smart Contracts
+
+The project uses Solidity smart contracts deployed on the BASE Sepolia testnet:
+
+- `DataHub.sol`: Main contract for storing, sharing, and purchasing healthcare data
+- Functions include: `storeData()`, `request()`, `reply()`, and `finalize()`
 
 ## Testing
 
@@ -197,38 +239,89 @@ docker-compose exec api python /app/test.py
 
 ## Troubleshooting
 
+### IPFS Connection Issues
+
+If you encounter issues with IPFS connectivity:
+
+1. **Check if IPFS container is running**:
+
+```bash
+docker ps | grep ipfs
+```
+
+2. **Check IPFS logs**:
+
+```bash
+docker logs ipfs-node
+```
+
+3. **Verify IPFS API is accessible**:
+
+```bash
+curl -X POST "http://localhost:5001/api/v0/id"
+```
+
+4. **Reset IPFS container and data**:
+
+```bash
+docker-compose down
+rm -rf ipfs-data
+mkdir -p ipfs-data
+chmod 777 ipfs-data
+docker-compose up -d ipfs
+```
+
 ### MCL Library and Group Signatures
 
 If you encounter issues with the MCL library or group signatures:
 
-1. **Check MCL_LIB_PATH**: Make sure the MCL_LIB_PATH environment variable is set correctly in the container:
-   ```bash
-   docker-compose exec api env | grep MCL_LIB_PATH
-   ```
-   It should be set to `/usr/local/lib/mcl`.
+1. **Check MCL_LIB_PATH environment variable**:
 
-2. **Check MCL library files**: Verify that the MCL library files exist in the container:
-   ```bash
-   docker-compose exec api ls -la /usr/local/lib/mcl
-   ```
-   You should see `libmcl.so` and `libmclbn384_256.so`.
+```bash
+docker-compose exec api env | grep MCL_LIB_PATH
+```
 
-3. **Rebuild the container**: If the MCL library is missing or not working, try rebuilding the container:
-   ```bash
-   docker-compose down
-   docker-compose build --no-cache
-   docker-compose up -d
-   ```
+2. **Verify MCL library files exist**:
 
-4. **Generate keys manually**: If the group signature keys are missing, you can generate them manually:
-   ```bash
-   docker-compose exec api python /app/generate_keys.py
-   ```
+```bash
+docker-compose exec api ls -la /usr/local/lib/mcl
+```
 
-5. **Check for GMP dependencies**: The MCL library requires GMP dependencies. Make sure they are installed:
-   ```bash
-   docker-compose exec api apt-get update && apt-get install -y libgmp-dev libgmp10 libgmpxx4ldbl
-   ```
+3. **Rebuild the container without cache**:
+
+```bash
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
+```
+
+4. **Generate group signature keys manually**:
+
+```bash
+docker-compose exec api python /app/generate_keys.py
+```
+
+### Blockchain Transaction Issues
+
+If you encounter issues with blockchain transactions:
+
+1. **Check wallet balances**:
+
+```bash
+# Check the balance of the wallet used for transactions
+docker-compose exec api python -c "from web3 import Web3; import os; w3 = Web3(Web3.HTTPProvider(os.getenv('BASE_RPC_URL'))); print(f'Balance: {w3.from_wei(w3.eth.get_balance(os.getenv(\"WALLET_ADDRESS\")), \"ether\")} ETH')"
+```
+
+2. **Get testnet ETH**:
+   - Visit [BASE Sepolia Faucet](https://www.coinbase.com/faucets/base-sepolia-faucet)
+   - Request ETH for your wallet addresses (doctor, patient, buyer, etc.)
+
+3. **Check contract deployment**:
+
+```bash
+# Verify the contract exists at the specified address
+docker-compose exec api python -c "from web3 import Web3; import os; import json; w3 = Web3(Web3.HTTPProvider(os.getenv('BASE_RPC_URL'))); addr = os.getenv('CONTRACT_ADDRESS'); print(f'Contract code exists: {w3.eth.get_code(addr).hex() != \"0x\"}')"
+```
 
 ### Docker Permission Issues
 
@@ -240,26 +333,16 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-### MCL Library Issues
+### Common Error Messages
 
-If you encounter issues with the MCL library:
+1. **"Insufficient funds for gas * price + value"**:
+   - Solution: Get more testnet ETH from the [BASE Sepolia Faucet](https://www.coinbase.com/faucets/base-sepolia-faucet)
 
-```bash
-# Check if the MCL library is properly built
-docker-compose exec api ls -la /usr/local/lib/mcl
-```
+2. **"Error loading plugins: open /var/ipfs/config: permission denied"**:
+   - Solution: Reset the IPFS container and data as described above
 
-### Smart Contract Issues
-
-If you encounter issues with smart contract interaction:
-
-```bash
-# Check if you have ETH in your account
-docker-compose exec api python -c "from web3 import Web3; from dotenv import load_dotenv; import os; load_dotenv(); w3 = Web3(Web3.HTTPProvider(os.getenv('BASE_RPC_URL'))); print(f'Balance: {w3.from_wei(w3.eth.get_balance(os.getenv(\"WALLET_ADDRESS\")), \"ether\")} ETH')"
-
-# Get testnet ETH from the Base Sepolia faucet
-echo "Visit https://faucet.base.org/ to get testnet ETH"
-```
+3. **"ImportError: libmcl.so: cannot open shared object file"**:
+   - Solution: Rebuild the container without cache to properly install the MCL library
 
 ## License
 

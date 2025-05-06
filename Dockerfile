@@ -45,9 +45,26 @@ RUN cd /app && npm install
 # Compile the smart contract
 RUN cd /app && npm run compile
 
-# Generate keys for group signature
-RUN mkdir -p /app/keys && \
-    python /app/generate_keys.py
+# Create keys directory
+RUN mkdir -p /app/keys
+
+# Copy the generate_keys.py script to be run at container startup
+COPY generate_keys.py /app/
+
+# Create a startup script that will generate keys if they don't exist
+RUN echo '#!/bin/bash\n\
+if [ ! -f /app/keys/group_public_key.b64 ]; then\n\
+    echo "Generating group signature keys..."\n\
+    python /app/generate_keys.py\n\
+fi\n\
+\n\
+# Execute the command passed to the container\n\
+exec "$@"\n\
+' > /app/docker-entrypoint.sh && \
+chmod +x /app/docker-entrypoint.sh
+
+# Set the entrypoint to our script
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 # Expose ports for FastAPI and Streamlit
 EXPOSE 8000 8501

@@ -5,13 +5,14 @@ import hashlib
 import base64
 import random
 from typing import Dict, List, Optional, Any
-from fastapi import FastAPI, HTTPException, Depends, Body, Response
+from fastapi import FastAPI, HTTPException, Depends, Body, Response, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import ipfshttpclient
 from web3 import Web3
 import uvicorn
 from dotenv import load_dotenv
+from eth_account.messages import encode_defunct
 
 # Import auto_fill_template module
 try:
@@ -45,6 +46,8 @@ from cryptography.hazmat.backends import default_backend
 from backend.data import MerkleService, encrypt_record, encrypt_hospital_info_and_key, generate_private_key, generate_public_key
 from backend.roles import Patient, Doctor, GroupManager
 from backend.groupsig_utils import sign_message, verify_signature, open_signature_group_manager, open_signature_revocation_manager, open_signature_full
+from backend.auth_utils import generate_auth_challenge, verify_auth_signature, is_authenticated, has_role, get_role, assign_role, logout
+from backend.constants import ROLES
 
 app = FastAPI(title="Healthcare Data Sharing API")
 
@@ -57,22 +60,258 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Standard API response helpers
+def success_response(data=None, message=None):
+    """
+    Create a standardized success response.
+
+    Args:
+        data: Optional data to include in the response
+        message: Optional message to include in the response
+
+    Returns:
+        dict: A standardized success response
+    """
+    response = {"status": "success"}
+
+    if data is not None:
+        response["data"] = data
+
+    if message is not None:
+        response["message"] = message
+
+    return response
+
+def error_response(message, status_code=400):
+    """
+    Create a standardized error response and raise an HTTPException.
+
+    Args:
+        message: Error message
+        status_code: HTTP status code
+
+    Raises:
+        HTTPException: With the specified status code and error details
+    """
+    raise HTTPException(
+        status_code=status_code,
+        detail={"status": "success", "error": message}
+    )
+
 # Health check endpoint
 @app.get("/health")
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint for Docker healthcheck"""
-    return {"status": "healthy", "timestamp": int(time.time())}
+    return success_response(
+        data={"timestamp": int(time.time())},
+        message="Service is healthy"
+    )
+
+# Authentication endpoints
+@app.post("/auth/challenge")
+@app.post("/api/auth/challenge")
+async def get_auth_challenge(request: Request):
+    """
+    Generate an authentication challenge for a wallet address.
+
+    Args:
+        request: The request object containing the wallet_address
+
+    Returns:
+        dict: The authentication challenge message
+    """
+    try:
+        # Parse the request body
+        body = await request.json()
+        wallet_address = body.get("wallet_address")
+
+        if not wallet_address:
+            error_response("wallet_address is required", 400)
+
+        challenge = generate_auth_challenge(wallet_address)
+        return success_response(
+            data={
+                "challenge": challenge,
+                "wallet_address": wallet_address
+            }
+        )
+    except Exception as e:
+        error_response(str(e), 500)
+
+@app.post("/auth/verify")
+@app.post("/api/auth/verify")
+async def verify_auth(request: Request):
+    """
+    Verify an authentication signature.
+
+    Args:
+        request: The request object containing wallet_address and signature
+
+    Returns:
+        dict: The authentication result
+    """
+    try:
+        # Parse the request body
+        body = await request.json()
+        wallet_address = body.get("wallet_address")
+        signature = body.get("signature")
+
+        if not wallet_address:
+            error_response("wallet_address is required", 400)
+
+        if not signature:
+            error_response("signature is required", 400)
+
+        # Check if the wallet address has a role assigned
+        role = get_role(wallet_address)
+        if not role:
+            # Auto-assign role based on predefined addresses
+            if wallet_address.lower() == PATIENT_ADDRESS.lower():
+                assign_role(wallet_address, ROLES["PATIENT"])
+                role = ROLES["PATIENT"]
+            elif wallet_address.lower() == DOCTOR_ADDRESS.lower():
+                assign_role(wallet_address, ROLES["DOCTOR"])
+                role = ROLES["DOCTOR"]
+            elif wallet_address.lower() == HOSPITAL_ADDRESS.lower():
+                assign_role(wallet_address, ROLES["HOSPITAL"])
+                role = ROLES["HOSPITAL"]
+            elif wallet_address.lower() == BUYER_ADDRESS.lower():
+                assign_role(wallet_address, ROLES["BUYER"])
+                role = ROLES["BUYER"]
+            elif wallet_address.lower() == GROUP_MANAGER_ADDRESS.lower():
+                assign_role(wallet_address, ROLES["GROUP_MANAGER"])
+                role = ROLES["GROUP_MANAGER"]
+            elif wallet_address.lower() == REVOCATION_MANAGER_ADDRESS.lower():
+                assign_role(wallet_address, ROLES["REVOCATION_MANAGER"])
+                role = ROLES["REVOCATION_MANAGER"]
+            else:
+                # Default to patient role for new addresses
+                assign_role(wallet_address, ROLES["PATIENT"])
+                role = ROLES["PATIENT"]
+
+        # Verify the signature
+        is_valid = verify_auth_signature(wallet_address, signature)
+
+        if is_valid:
+            return success_response(
+                data={
+                    "authenticated": True,
+                    "wallet_address": wallet_address,
+                    "role": role
+                }
+            )
+        else:
+            return success_response(
+                data={
+                    "authenticated": False,
+                    "wallet_address": wallet_address
+                },
+                message="Invalid signature"
+            )
+    except Exception as e:
+        error_response(str(e), 500)
+
+@app.post("/auth/logout")
+@app.post("/api/auth/logout")
+async def logout_user(request: Request):
+    """
+    Log out a wallet address.
+
+    Args:
+        request: The request object containing the wallet_address
+
+    Returns:
+        dict: The logout result
+    """
+    try:
+        # Parse the request body
+        body = await request.json()
+        wallet_address = body.get("wallet_address")
+
+        if not wallet_address:
+            error_response("wallet_address is required", 400)
+
+        success = logout(wallet_address)
+
+        if success:
+            return success_response(message="Logged out successfully")
+        else:
+            return success_response(message="Not logged in")
+    except Exception as e:
+        error_response(str(e), 500)
+
+@app.get("/auth/status")
+@app.get("/api/auth/status")
+async def auth_status(wallet_address: str):
+    """
+    Check the authentication status of a wallet address.
+
+    Args:
+        wallet_address: The wallet address to check
+
+    Returns:
+        dict: The authentication status
+    """
+    try:
+        authenticated = is_authenticated(wallet_address)
+        role = get_role(wallet_address)
+
+        return success_response(
+            data={
+                "authenticated": authenticated,
+                "wallet_address": wallet_address,
+                "role": role
+            }
+        )
+    except Exception as e:
+        error_response(str(e), 500)
+
+@app.post("/api/auth/assign-role")
+async def assign_user_role(wallet_address: str = Body(...), role: str = Body(...), admin_wallet_address: str = Body(...)):
+    """
+    Assign a role to a wallet address.
+
+    Args:
+        wallet_address: The wallet address to assign the role to
+        role: The role to assign
+        admin_wallet_address: The wallet address of the admin making the request
+
+    Returns:
+        dict: The role assignment result
+    """
+    try:
+        # Check if the admin is authenticated and has the hospital role
+        if not has_role(admin_wallet_address, ROLES["HOSPITAL"]):
+            error_response("Only hospital administrators can assign roles", 403)
+
+        # Assign the role
+        success = assign_role(wallet_address, role)
+
+        if success:
+            return success_response(
+                message=f"Role {role} assigned to {wallet_address}"
+            )
+        else:
+            error_response("Failed to assign role", 400)
+    except HTTPException:
+        # Re-raise HTTPExceptions as they already have the correct format
+        raise
+    except Exception as e:
+        error_response(str(e), 500)
 
 # Load environment variables
 load_dotenv()
 
 # Connect to local IPFS
 IPFS_URL = os.getenv("IPFS_URL", "/ip4/127.0.0.1/tcp/5001")
+print(f"IPFS URL from environment: {IPFS_URL}")
 
 # Try multiple IPFS connection URLs in case one fails
 ipfs_urls = [
     IPFS_URL,
+    "http://localhost:5001",
+    "http://127.0.0.1:5001",
     "/dns4/ipfs/tcp/5001",
     "/ip4/127.0.0.1/tcp/5001",
     "/ip4/localhost/tcp/5001"
@@ -146,20 +385,13 @@ def check_ipfs_connection():
 if ipfs_client is None:
     print("Warning: Could not connect to any IPFS node. Storage functionality will be limited.")
 
-# Connect to Base Sepolia testnet via Coinbase Cloud
-BASE_SEPOLIA_RPC_URL = os.getenv("BASE_SEPOLIA_RPC_URL", "https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf")
-CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA")
-PRIVATE_KEY = os.getenv("PRIVATE_KEY", "91e5c2bed81b69f9176b6404710914e9bf36a6359122a2d1570116fc6322562e")
-# Default addresses for each role
-PATIENT_ADDRESS = os.getenv("PATIENT_ADDRESS", "0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A")
-DOCTOR_ADDRESS = os.getenv("DOCTOR_ADDRESS", "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")
-HOSPITAL_ADDRESS = os.getenv("HOSPITAL_ADDRESS", "0x28B317594b44483D24EE8AdCb13A1b148497C6ba")
-BUYER_ADDRESS = os.getenv("BUYER_ADDRESS", "0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce")
-GROUP_MANAGER_ADDRESS = os.getenv("GROUP_MANAGER_ADDRESS", "0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
-REVOCATION_MANAGER_ADDRESS = os.getenv("REVOCATION_MANAGER_ADDRESS", "0x4b42EE1d1AEe8d3cc691661aa3b25D98Dac2FE46")
-
-# Default wallet address (for backward compatibility)
-WALLET_ADDRESS = PATIENT_ADDRESS
+# Import constants from constants.py
+from backend.constants import (
+    BASE_SEPOLIA_RPC_URL, CONTRACT_ADDRESS, PRIVATE_KEY,
+    PATIENT_ADDRESS, DOCTOR_ADDRESS, HOSPITAL_ADDRESS,
+    BUYER_ADDRESS, GROUP_MANAGER_ADDRESS, REVOCATION_MANAGER_ADDRESS,
+    WALLET_ADDRESS
+)
 
 # Key management system
 class KeyManager:
@@ -924,11 +1156,81 @@ async def request_revocation(
         if purchase_data.get("template_cid") != template_cid:
             raise HTTPException(status_code=400, detail=f"Template CID {template_cid} does not match the one in request {request_id}")
 
-        # Generate a transaction hash for demo purposes
-        tx_hash = f"0x{hashlib.sha256(f'{request_id}_{template_cid}_{signature}_{int(time.time())}'.encode()).hexdigest()}"
+        # Get the buyer's private key
+        BUYER_PRIVATE_KEY = os.getenv('BUYER_PRIVATE_KEY')
+        if not BUYER_PRIVATE_KEY:
+            raise ValueError("Missing required environment variable: BUYER_PRIVATE_KEY")
 
-        # Calculate a simulated gas fee
-        gas_fee = round(random.uniform(0.002, 0.005), 4)  # Revocation costs more gas
+        # Create account from private key
+        account = w3.eth.account.from_key(BUYER_PRIVATE_KEY)
+        buyer_address = account.address
+        print(f"Using buyer address: {buyer_address}")
+
+        # Get current gas price with a premium for faster confirmation
+        gas_price = w3.eth.gas_price
+        gas_price_with_premium = int(gas_price * 1.5)  # 50% premium
+
+        # Get nonce for the buyer's address
+        nonce = w3.eth.get_transaction_count(buyer_address)
+        print(f"Current nonce for {buyer_address}: {nonce}")
+
+        # Convert signature to bytes32 format for the contract
+        if isinstance(signature, str):
+            # Hash the signature to get a bytes32 value
+            signature_hash = Web3.to_bytes(hexstr='0x' + hashlib.sha256(signature.encode()).hexdigest())
+        else:
+            # Fallback for non-string input
+            signature_hash = Web3.to_bytes(hexstr='0x' + hashlib.sha256(str(signature).encode()).hexdigest())
+
+        # Convert request_id to int if it's a string representation of a number
+        try:
+            request_id_int = int(request_id)
+        except ValueError:
+            # If it's not a number, hash it to get a number
+            request_id_int = int(hashlib.sha256(request_id.encode()).hexdigest(), 16) % (2**64)
+
+        print(f"Using request ID for contract call: {request_id_int}")
+        print(f"Using signature hash: {signature_hash.hex()}")
+
+        # Build the transaction
+        tx = contract.functions.requestOpening(signature_hash, request_id_int).build_transaction({
+            'from': buyer_address,
+            'gas': 2000000,  # Gas limit set to 2,000,000
+            'gasPrice': gas_price_with_premium,
+            'nonce': nonce,
+        })
+
+        # Sign the transaction
+        signed_tx = w3.eth.account.sign_transaction(tx, BUYER_PRIVATE_KEY)
+
+        # Send the transaction
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        tx_hash_hex = tx_hash.hex()
+        print(f"Transaction sent: {tx_hash_hex}")
+
+        # Wait for transaction receipt
+        print(f"Waiting for transaction receipt for {tx_hash_hex}...")
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash_hex, timeout=120)
+        print(f"Transaction receipt received: {receipt}")
+
+        # Get the opening ID from the event logs
+        opening_id = None
+        for log in receipt.logs:
+            try:
+                # Try to decode the log as an OpeningRequested event
+                decoded_log = contract.events.OpeningRequested().process_log(log)
+                opening_id = decoded_log['args']['openingId']
+                print(f"Found opening ID from event: {opening_id}")
+                break
+            except Exception as log_error:
+                print(f"Error decoding log: {str(log_error)}")
+                continue
+
+        # Calculate actual gas fee
+        gas_used = receipt['gasUsed']
+        gas_price_wei = receipt['effectiveGasPrice']
+        gas_fee = w3.from_wei(gas_used * gas_price_wei, 'ether')
+        print(f"Gas used: {gas_used}, Gas price: {w3.from_wei(gas_price_wei, 'gwei')} Gwei, Total fee: {gas_fee} ETH")
 
         # Create transaction history entry for revocation request
         revocation_transaction = {
@@ -937,14 +1239,17 @@ async def request_revocation(
             "type": "Revocation Request",
             "status": "Completed",
             "timestamp": int(time.time()),
-            "tx_hash": tx_hash,
-            "gas_fee": gas_fee,
+            "tx_hash": tx_hash_hex,
+            "gas_fee": float(gas_fee),
             "buyer": wallet_address,
             "template_cid": template_cid,
             "signature": signature,
+            "opening_id": opening_id,
             "details": {
                 "message": "Revocation request submitted to Group Manager and Revocation Manager",
-                "reason": "Verification failed"
+                "reason": "Verification failed",
+                "gas_used": gas_used,
+                "gas_price_gwei": float(w3.from_wei(gas_price_wei, 'gwei'))
             }
         }
 
@@ -955,20 +1260,18 @@ async def request_revocation(
         purchase_data["revocation_requested"] = True
         purchase_data["revocation_requested_at"] = int(time.time())
         purchase_data["revocation_transaction"] = revocation_transaction
+        purchase_data["opening_id"] = opening_id
 
         # Save the updated purchase data
         with open(request_file, "w") as f:
             json.dump(purchase_data, f)
 
-        # In a real implementation, this would call the smart contract to request revocation
-        #tx_hash = contract.functions.requestRevocation(signature).transact({'from': wallet_address})
-        #receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-
         return {
             "status": "success",
             "message": "Revocation request submitted successfully",
-            "transaction_hash": tx_hash,
-            "gas_fee": gas_fee
+            "transaction_hash": tx_hash_hex,
+            "gas_fee": float(gas_fee),
+            "opening_id": opening_id
         }
     except HTTPException:
         raise
@@ -986,65 +1289,44 @@ def store_on_ipfs(data):
     Returns:
         str: The CID (Content Identifier) or local hash
     """
-    # Check if IPFS is connected
-    if check_ipfs_connection():
-        try:
-            # Store on IPFS
-            print(f"Storing {len(data)} bytes on IPFS...")
+    try:
+        # Use our IPFS CLI wrapper to add data to IPFS (bypassing version compatibility issues)
+        from backend.ipfs_cli import add_to_ipfs, pin_to_ipfs, is_ipfs_running
 
-            # Try different methods to add data to IPFS
-            try:
-                # First try add_bytes
-                result = ipfs_client.add_bytes(data)
-                print(f"IPFS add_bytes result: {result}")
-            except Exception as add_bytes_error:
-                print(f"Warning: add_bytes failed: {str(add_bytes_error)}")
+        # Check if IPFS daemon is running
+        if is_ipfs_running():
+            print(f"Storing {len(data)} bytes on IPFS using CLI...")
 
-                # Try add with files parameter
-                try:
-                    import tempfile
-                    with tempfile.NamedTemporaryFile() as temp:
-                        temp.write(data)
-                        temp.flush()
-                        add_result = ipfs_client.add(temp.name)
-                        result = add_result['Hash']
-                        print(f"IPFS add result: {result}")
-                except Exception as add_error:
-                    print(f"Warning: add failed: {str(add_error)}")
-                    raise  # Re-raise to fall back to local storage
+            # Add the data to IPFS
+            add_result = add_to_ipfs(data)
 
-            # Handle different return types
-            if isinstance(result, dict) and "Hash" in result:
-                cid = result["Hash"]
+            if add_result["success"]:
+                cid = add_result["cid"]
                 print(f"Successfully stored on IPFS with CID: {cid}")
 
                 # Pin the content to make sure it's not garbage collected
-                try:
-                    ipfs_client.pin.add(cid)
+                pin_result = pin_to_ipfs(cid)
+                if pin_result["success"]:
                     print(f"Pinned content with CID: {cid}")
-                except Exception as pin_error:
-                    print(f"Warning: Could not pin content: {str(pin_error)}")
+                else:
+                    print(f"Warning: Could not pin content: {pin_result.get('error', 'Unknown error')}")
+                    # Continue anyway, the content is still stored in IPFS even if not pinned
+
+                # Also store locally as a backup
+                os.makedirs("local_storage", exist_ok=True)
+                with open(f"local_storage/{cid}", "wb") as f:
+                    f.write(data)
+                print(f"Also stored file locally with CID: {cid}")
 
                 return cid
-            elif isinstance(result, str):
-                print(f"Successfully stored on IPFS with CID: {result}")
-
-                # Pin the content to make sure it's not garbage collected
-                try:
-                    ipfs_client.pin.add(result)
-                    print(f"Pinned content with CID: {result}")
-                except Exception as pin_error:
-                    print(f"Warning: Could not pin content: {str(pin_error)}")
-
-                return result
             else:
-                print(f"Warning: Unexpected IPFS result format: {result}")
+                print(f"Warning: Error adding to IPFS: {add_result.get('error', 'Unknown error')}")
                 # Fall back to local storage
-        except Exception as e:
-            print(f"Warning: Error storing on IPFS: {str(e)}")
-            # Fall back to local storage
-    else:
-        print("IPFS not connected, using local storage")
+        else:
+            print("IPFS daemon is not running, using local storage only")
+    except Exception as e:
+        print(f"Warning: Error using IPFS CLI: {str(e)}")
+        # Fall back to local storage
 
     # Fallback: Store locally (for development only)
     import hashlib
@@ -1576,7 +1858,7 @@ async def store_record(data: dict):
 
                     tx = contract.functions.storeData(cid_bytes32, merkle_root_bytes32, signature_bytes).build_transaction({
                         'from': doctor_address,
-                        'gas': 200000,  # Gas limit
+                        'gas': 2000000,  # Gas limit increased to 2,000,000
                         'gasPrice': gas_price_with_premium,
                         'nonce': nonce,
                     })
@@ -1851,35 +2133,81 @@ async def list_patient_records(patient_address: str):
             try:
                 # In a real implementation, we would query IPFS for records owned by this patient
                 # For demo purposes, we'll check the pinned items
-                pins = ipfs_client.pin.ls()
-                if 'Keys' in pins:
-                    for pin_cid in pins['Keys']:
-                        if pin_cid not in [r.get('cid') for r in records]:  # Skip if already added
+                try:
+                    # Use our IPFS CLI wrapper to get pins (bypassing version compatibility issues)
+                    from backend.ipfs_cli import get_ipfs_pins, is_ipfs_running
+
+                    # Check if IPFS daemon is running
+                    if is_ipfs_running():
+                        pin_cids = get_ipfs_pins()
+                        print(f"Successfully retrieved {len(pin_cids)} pins using IPFS CLI")
+                    else:
+                        print("IPFS daemon is not running, using local storage only")
+                        pin_cids = []
+                except Exception as cli_error:
+                    print(f"Error using IPFS CLI: {str(cli_error)}")
+                    pin_cids = []
+
+                # If we couldn't get pins from IPFS CLI, try local storage
+                if not pin_cids:
+                    print("Using fallback method to get records from local storage")
+                    # Try to get CIDs from local storage directory
+                    if os.path.exists("local_storage"):
+                        for file_name in os.listdir("local_storage"):
+                            if os.path.isfile(os.path.join("local_storage", file_name)):
+                                pin_cids.append(file_name)
+
+                # Process each CID
+                for pin_cid in pin_cids:
+                    if pin_cid not in [r.get('cid') for r in records]:  # Skip if already added
+                        try:
+                            # Try to retrieve and decrypt the record
                             try:
-                                # Try to retrieve and decrypt the record
-                                encrypted_record = ipfs_client.cat(pin_cid)
+                                # Use our IPFS CLI wrapper to retrieve data
+                                from backend.ipfs_cli import cat_from_ipfs
 
-                                # Generate the patient's key deterministically
-                                patient_key = hashlib.sha256(f"{patient_address}_key".encode()).digest()
+                                cat_result = cat_from_ipfs(pin_cid)
+                                if cat_result["success"]:
+                                    encrypted_record = cat_result["data"]
+                                    print(f"Retrieved {len(encrypted_record)} bytes from IPFS using CLI")
+                                else:
+                                    raise Exception(f"IPFS CLI error: {cat_result.get('error', 'Unknown error')}")
+                            except Exception as cat_error:
+                                print(f"Error retrieving {pin_cid} from IPFS: {str(cat_error)}")
+                                # Try local storage as fallback
+                                try:
+                                    with open(f"local_storage/{pin_cid}", "rb") as f:
+                                        encrypted_record = f.read()
+                                    print(f"Retrieved {len(encrypted_record)} bytes from local storage")
+                                except FileNotFoundError:
+                                    print(f"Record {pin_cid} not found in local storage")
+                                    continue
 
-                                # Decrypt the record
+                            # Generate the patient's key deterministically
+                            patient_key = hashlib.sha256(f"{patient_address}_key".encode()).digest()
+
+                            # Decrypt the record
+                            try:
                                 decrypted_record = decrypt_record(encrypted_record, patient_key)
+                            except Exception as decrypt_error:
+                                print(f"Error decrypting record {pin_cid}: {str(decrypt_error)}")
+                                continue
 
-                                # Check both patientId and patientID (case sensitivity)
-                                patient_id = decrypted_record.get("patientId") or decrypted_record.get("patientID")
+                            # Check both patientId and patientID (case sensitivity)
+                            patient_id = decrypted_record.get("patientId") or decrypted_record.get("patientID")
 
-                                # Print debug info
-                                print(f"IPFS: Found record with patient ID: {patient_id}")
+                            # Print debug info
+                            print(f"IPFS: Found record with patient ID: {patient_id}")
 
-                                if patient_id == patient_address:
-                                    # Add metadata to the record
-                                    decrypted_record["cid"] = pin_cid
-                                    decrypted_record["timestamp"] = int(time.time())  # Use current time as fallback
-                                    records.append(decrypted_record)
-                                    print(f"IPFS: Added record {pin_cid} to patient's records")
-                            except Exception as e:
-                                # Skip records that can't be decrypted with this patient's key
-                                print(f"IPFS: Skipping record {pin_cid}: {str(e)}")
+                            if patient_id == patient_address:
+                                # Add metadata to the record
+                                decrypted_record["cid"] = pin_cid
+                                decrypted_record["timestamp"] = int(time.time())  # Use current time as fallback
+                                records.append(decrypted_record)
+                                print(f"IPFS: Added record {pin_cid} to patient's records")
+                        except Exception as e:
+                            # Skip records that can't be decrypted with this patient's key
+                            print(f"IPFS: Skipping record {pin_cid}: {str(e)}")
             except Exception as e:
                 print(f"Error checking IPFS pins: {str(e)}")
 
@@ -2220,16 +2548,29 @@ async def share_record(record_cid: str = Body(None), doctor_address: str = Body(
 
         # 8. Pin both files
         try:
-            ipfs_client.pin.add(cid_share)
-            print(f"Pinned record CID: {cid_share}")
+            # Try to use our custom helper function that uses direct HTTP API calls
+            from backend.ipfs_helper import pin_to_ipfs
+            if pin_to_ipfs(cid_share):
+                print(f"Pinned record CID: {cid_share} using direct HTTP API")
+            else:
+                # Fall back to the ipfshttpclient method
+                ipfs_client.pin.add(cid_share)
+                print(f"Pinned record CID: {cid_share} using ipfshttpclient")
         except Exception as pin_error:
-            print(f"Warning: Error pinning record: {str(pin_error)}")
+            print(f"Warning: Error pinning record (likely protobuf error): {str(pin_error)}")
+            # Continue anyway, the content is still stored in IPFS even if not pinned
 
         try:
-            ipfs_client.pin.add(sharing_metadata_cid)
-            print(f"Pinned metadata CID: {sharing_metadata_cid}")
+            # Try to use our custom helper function that uses direct HTTP API calls
+            if pin_to_ipfs(sharing_metadata_cid):
+                print(f"Pinned metadata CID: {sharing_metadata_cid} using direct HTTP API")
+            else:
+                # Fall back to the ipfshttpclient method
+                ipfs_client.pin.add(sharing_metadata_cid)
+                print(f"Pinned metadata CID: {sharing_metadata_cid} using ipfshttpclient")
         except Exception as pin_error:
-            print(f"Warning: Error pinning metadata: {str(pin_error)}")
+            print(f"Warning: Error pinning metadata (likely protobuf error): {str(pin_error)}")
+            # Continue anyway, the content is still stored in IPFS even if not pinned
 
         # 9. Notify the doctor (in a real implementation, this would send a notification)
         # For demo purposes, we'll just log it
@@ -2278,22 +2619,113 @@ async def request_purchase(purchase_req: Optional[PurchaseRequest] = None, walle
         else:
             print(f"Warning: Non-buyer address {wallet_address} is attempting to request a purchase")
 
-        # This would call the smart contract in production
-        # tx_hash = contract.functions.request(final_template_hash).transact({
-        #     'from': wallet_address,
-        #     'value': w3.toWei(final_amount, 'ether')
-        # })
-        # receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-
-        # For demo purposes, generate a unique request ID
+        # Generate a unique request ID
         import uuid
         request_id = str(uuid.uuid4())
 
-        # Generate a transaction hash for demo purposes
-        tx_hash = f"0x{hashlib.sha256(request_id.encode()).hexdigest()}"
+        # Convert template hash to bytes32 format for the contract
+        if isinstance(final_template_hash, str):
+            if final_template_hash.startswith('0x'):
+                # Already a hex string with 0x prefix
+                template_hash_bytes32 = Web3.to_bytes(hexstr=final_template_hash)
+            else:
+                # Hash the string to get a bytes32 value
+                template_hash_bytes32 = Web3.to_bytes(hexstr='0x' + hashlib.sha256(final_template_hash.encode()).hexdigest())
+        else:
+            # Fallback for non-string input
+            template_hash_bytes32 = Web3.to_bytes(hexstr='0x' + hashlib.sha256(str(final_template_hash).encode()).hexdigest())
 
-        # Calculate a simulated gas fee
-        gas_fee = round(random.uniform(0.001, 0.003), 4)
+        # Get the buyer's private key
+        BUYER_PRIVATE_KEY = os.getenv('BUYER_PRIVATE_KEY')
+        if not BUYER_PRIVATE_KEY:
+            raise ValueError("Missing required environment variable: BUYER_PRIVATE_KEY")
+
+        # Create account from private key
+        account = w3.eth.account.from_key(BUYER_PRIVATE_KEY)
+        buyer_address = account.address
+        print(f"Using buyer address: {buyer_address}")
+
+        # Get current gas price with a premium for faster confirmation
+        gas_price = w3.eth.gas_price
+        gas_price_with_premium = int(gas_price * 1.5)  # 50% premium
+
+        # Get nonce for the buyer's address
+        nonce = w3.eth.get_transaction_count(buyer_address)
+        print(f"Current nonce for {buyer_address}: {nonce}")
+
+        # Convert amount to wei
+        amount_wei = w3.to_wei(final_amount, 'ether')
+
+        # Build the transaction
+        tx = contract.functions.request(template_hash_bytes32).build_transaction({
+            'from': buyer_address,
+            'gas': 2000000,  # Gas limit set to 2,000,000
+            'gasPrice': gas_price_with_premium,
+            'nonce': nonce,
+            'value': amount_wei  # Send ETH with the transaction
+        })
+
+        # Sign the transaction
+        signed_tx = w3.eth.account.sign_transaction(tx, BUYER_PRIVATE_KEY)
+
+        try:
+            # Check balance before sending transaction
+            balance = w3.eth.get_balance(buyer_address)
+            transaction_cost = amount_wei + (gas_price_with_premium * 2000000)  # value + estimated gas cost
+
+            print(f"Buyer balance: {w3.from_wei(balance, 'ether')} ETH")
+            print(f"Transaction cost: {w3.from_wei(transaction_cost, 'ether')} ETH")
+
+            if balance < transaction_cost:
+                raise ValueError(f"Insufficient funds: have {w3.from_wei(balance, 'ether')} ETH, need approximately {w3.from_wei(transaction_cost, 'ether')} ETH")
+
+            # Send the transaction
+            tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            tx_hash_hex = tx_hash.hex()
+            print(f"Transaction sent: {tx_hash_hex}")
+
+            # Wait for transaction receipt
+            print(f"Waiting for transaction receipt for {tx_hash_hex}...")
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash_hex, timeout=120)
+            print(f"Transaction receipt received: {receipt}")
+        except ValueError as ve:
+            if "insufficient funds" in str(ve).lower():
+                # Handle insufficient funds error
+                print(f"Insufficient funds error: {str(ve)}")
+
+                # Create a simulated transaction for demo purposes
+                tx_hash_hex = f"0x{hashlib.sha256(f'simulated_tx_{request_id}_{int(time.time())}'.encode()).hexdigest()}"
+                print(f"Created simulated transaction hash: {tx_hash_hex}")
+
+                # Return a helpful error message with instructions
+                error_msg = f"Insufficient funds for transaction. Please get test ETH from the BASE Sepolia faucet: https://www.coinbase.com/faucets/base-sepolia-faucet"
+                raise HTTPException(status_code=400, detail=error_msg)
+            else:
+                # Re-raise other ValueError exceptions
+                raise
+
+        # Get the request ID from the event logs
+        request_id_from_event = None
+        for log in receipt.logs:
+            try:
+                # Try to decode the log as a RequestOpen event
+                decoded_log = contract.events.RequestOpen().process_log(log)
+                request_id_from_event = decoded_log['args']['id']
+                print(f"Found request ID from event: {request_id_from_event}")
+                request_id = str(request_id_from_event)  # Use the on-chain request ID
+                break
+            except Exception as log_error:
+                print(f"Error decoding log: {str(log_error)}")
+                continue
+
+        # Calculate actual gas fee
+        gas_used = receipt['gasUsed']
+        gas_price_wei = receipt['effectiveGasPrice']
+        gas_fee = w3.from_wei(gas_used * gas_price_wei, 'ether')
+        print(f"Gas used: {gas_used}, Gas price: {w3.from_wei(gas_price_wei, 'gwei')} Gwei, Total fee: {gas_fee} ETH")
+
+        # Use the transaction hash from the receipt
+        tx_hash = receipt['transactionHash'].hex()
 
         # Store the request in a local file for demo purposes
         # In a real implementation, this would be stored on the blockchain
@@ -2398,11 +2830,75 @@ async def reply_to_purchase(
         if price_per_record is None:
             price_per_record = 0.01                # Default price per record
 
-        # Generate a transaction hash for demo purposes
-        tx_hash = f"0x{hashlib.sha256(f'{request_id}_{records_count}_{patients_count}_{int(time.time())}'.encode()).hexdigest()}"
+        # Get the hospital's private key
+        HOSPITAL_PRIVATE_KEY = os.getenv('HOSPITAL_PRIVATE_KEY')
+        if not HOSPITAL_PRIVATE_KEY:
+            raise ValueError("Missing required environment variable: HOSPITAL_PRIVATE_KEY")
 
-        # Calculate a simulated gas fee
-        gas_fee = round(random.uniform(0.001, 0.003), 4)
+        # Create account from private key
+        account = w3.eth.account.from_key(HOSPITAL_PRIVATE_KEY)
+        hospital_address = account.address
+        print(f"Using hospital address: {hospital_address}")
+
+        # Get current gas price with a premium for faster confirmation
+        gas_price = w3.eth.gas_price
+        gas_price_with_premium = int(gas_price * 1.5)  # 50% premium
+
+        # Get nonce for the hospital's address
+        nonce = w3.eth.get_transaction_count(hospital_address)
+        print(f"Current nonce for {hospital_address}: {nonce}")
+
+        # Convert template_cid to bytes32 format for the contract
+        if template_cid:
+            clean_template_cid = clean_cid(template_cid)
+            if clean_template_cid.startswith('0x'):
+                # Already a hex string with 0x prefix
+                template_cid_bytes32 = Web3.to_bytes(hexstr=clean_template_cid)
+            else:
+                # Hash the string to get a bytes32 value
+                template_cid_bytes32 = Web3.to_bytes(hexstr='0x' + hashlib.sha256(clean_template_cid.encode()).hexdigest())
+        else:
+            # Generate a placeholder template CID
+            template_cid_bytes32 = Web3.to_bytes(hexstr='0x' + hashlib.sha256(f"template_{request_id}".encode()).hexdigest())
+
+        # Convert request_id to int if it's a string representation of a number
+        try:
+            request_id_int = int(request_id)
+        except ValueError:
+            # If it's not a number, hash it to get a number
+            request_id_int = int(hashlib.sha256(request_id.encode()).hexdigest(), 16) % (2**64)
+
+        print(f"Using request ID for contract call: {request_id_int}")
+
+        # Build the transaction
+        tx = contract.functions.reply(request_id_int, template_cid_bytes32).build_transaction({
+            'from': hospital_address,
+            'gas': 2000000,  # Gas limit set to 2,000,000
+            'gasPrice': gas_price_with_premium,
+            'nonce': nonce,
+        })
+
+        # Sign the transaction
+        signed_tx = w3.eth.account.sign_transaction(tx, HOSPITAL_PRIVATE_KEY)
+
+        # Send the transaction
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        tx_hash_hex = tx_hash.hex()
+        print(f"Transaction sent: {tx_hash_hex}")
+
+        # Wait for transaction receipt
+        print(f"Waiting for transaction receipt for {tx_hash_hex}...")
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash_hex, timeout=120)
+        print(f"Transaction receipt received: {receipt}")
+
+        # Calculate actual gas fee
+        gas_used = receipt['gasUsed']
+        gas_price_wei = receipt['effectiveGasPrice']
+        gas_fee = w3.from_wei(gas_used * gas_price_wei, 'ether')
+        print(f"Gas used: {gas_used}, Gas price: {w3.from_wei(gas_price_wei, 'gwei')} Gwei, Total fee: {gas_fee} ETH")
+
+        # Use the transaction hash from the receipt
+        tx_hash = receipt['transactionHash'].hex()
 
         # Create transaction history entry
         transaction = {
@@ -2548,11 +3044,78 @@ async def finalize_purchase(
         if False:  # Temporarily disable this check
             raise HTTPException(status_code=400, detail=f"Purchase request {request_id} has not been replied to yet (current status: {status})")
 
-        # Generate a transaction hash for demo purposes
-        tx_hash = f"0x{hashlib.sha256(f'{request_id}_{approved}_{int(time.time())}'.encode()).hexdigest()}"
+        # Get the buyer's private key
+        BUYER_PRIVATE_KEY = os.getenv('BUYER_PRIVATE_KEY')
+        if not BUYER_PRIVATE_KEY:
+            raise ValueError("Missing required environment variable: BUYER_PRIVATE_KEY")
 
-        # Calculate a simulated gas fee
-        gas_fee = round(random.uniform(0.002, 0.004), 4)  # Finalization costs more gas
+        # Create account from private key
+        account = w3.eth.account.from_key(BUYER_PRIVATE_KEY)
+        buyer_address = account.address
+        print(f"Using buyer address: {buyer_address}")
+
+        # Get current gas price with a premium for faster confirmation
+        gas_price = w3.eth.gas_price
+        gas_price_with_premium = int(gas_price * 1.5)  # 50% premium
+
+        # Get nonce for the buyer's address
+        nonce = w3.eth.get_transaction_count(buyer_address)
+        print(f"Current nonce for {buyer_address}: {nonce}")
+
+        # Convert request_id to int if it's a string representation of a number
+        try:
+            request_id_int = int(request_id)
+        except ValueError:
+            # If it's not a number, hash it to get a number
+            request_id_int = int(hashlib.sha256(request_id.encode()).hexdigest(), 16) % (2**64)
+
+        print(f"Using request ID for contract call: {request_id_int}")
+
+        # Convert recipients to address array
+        recipient_addresses = []
+        for recipient in recipients:
+            try:
+                # Ensure the address is checksummed
+                recipient_addresses.append(w3.to_checksum_address(recipient))
+            except Exception as addr_error:
+                print(f"Error with recipient address {recipient}: {str(addr_error)}")
+                # Skip invalid addresses
+                continue
+
+        if not recipient_addresses:
+            raise ValueError("No valid recipient addresses provided")
+
+        print(f"Using recipient addresses: {recipient_addresses}")
+
+        # Build the transaction
+        tx = contract.functions.finalize(request_id_int, approved, recipient_addresses).build_transaction({
+            'from': buyer_address,
+            'gas': 2000000,  # Gas limit set to 2,000,000
+            'gasPrice': gas_price_with_premium,
+            'nonce': nonce,
+        })
+
+        # Sign the transaction
+        signed_tx = w3.eth.account.sign_transaction(tx, BUYER_PRIVATE_KEY)
+
+        # Send the transaction
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        tx_hash_hex = tx_hash.hex()
+        print(f"Transaction sent: {tx_hash_hex}")
+
+        # Wait for transaction receipt
+        print(f"Waiting for transaction receipt for {tx_hash_hex}...")
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash_hex, timeout=120)
+        print(f"Transaction receipt received: {receipt}")
+
+        # Calculate actual gas fee
+        gas_used = receipt['gasUsed']
+        gas_price_wei = receipt['effectiveGasPrice']
+        gas_fee = w3.from_wei(gas_used * gas_price_wei, 'ether')
+        print(f"Gas used: {gas_used}, Gas price: {w3.from_wei(gas_price_wei, 'gwei')} Gwei, Total fee: {gas_fee} ETH")
+
+        # Use the transaction hash from the receipt
+        tx_hash = receipt['transactionHash'].hex()
 
         # Get the amount from the purchase data
         amount = purchase_data.get("amount", 0.1)  # Default to 0.1 ETH if not found
@@ -2907,7 +3470,18 @@ async def access_shared_record(metadata_cid: str = Body(...), wallet_address: st
 
         # 8. Pin the record for future access
         if ipfs_client:
-            ipfs_client.pin.add(record_cid)
+            try:
+                # Try to use our custom helper function that uses direct HTTP API calls
+                from backend.ipfs_helper import pin_to_ipfs
+                if pin_to_ipfs(record_cid):
+                    print(f"Pinned record CID: {record_cid} using direct HTTP API")
+                else:
+                    # Fall back to the ipfshttpclient method
+                    ipfs_client.pin.add(record_cid)
+                    print(f"Pinned record CID: {record_cid} using ipfshttpclient")
+            except Exception as pin_error:
+                print(f"Warning: Error pinning record (likely protobuf error): {str(pin_error)}")
+                # Continue anyway, the content is still stored in IPFS even if not pinned
 
         return {
             "status": "success",
@@ -3087,32 +3661,168 @@ async def compute_partial_opening(
     wallet_address: str = Body(...)
 ):
     """
-    Compute opening off-chain (BBS04 only has one manager)
+    Compute opening off-chain and approve on-chain (BBS04 only has one manager)
     """
     try:
         # Verify the caller is authorized using the predefined addresses
-
-        # Check if the wallet address matches any of the role addresses
         if manager_type == "group" and wallet_address != GROUP_MANAGER_ADDRESS:
             raise HTTPException(status_code=403, detail="Not authorized as Group Manager")
         elif manager_type == "revocation" and wallet_address != REVOCATION_MANAGER_ADDRESS:
             raise HTTPException(status_code=403, detail="Not authorized as Revocation Manager")
 
-        # Compute the opening
+        # Compute the opening off-chain
         open_result = open_signature_group_manager(signature)
         if open_result is None:
             # Fallback for demo purposes
             print("Warning: Signature opening failed. Using mock value.")
             open_result = {"signer": f"mock_signer_{opening_id}_{int(time.time())}"}
 
+        # Now submit the approval on-chain
+        if manager_type == "group":
+            # Get the Group Manager's private key
+            GROUP_MANAGER_PRIVATE_KEY = os.getenv('GROUP_MANAGER_PRIVATE_KEY')
+            if not GROUP_MANAGER_PRIVATE_KEY:
+                raise ValueError("Missing required environment variable: GROUP_MANAGER_PRIVATE_KEY")
+
+            # Create account from private key
+            account = w3.eth.account.from_key(GROUP_MANAGER_PRIVATE_KEY)
+            manager_address = account.address
+            print(f"Using Group Manager address: {manager_address}")
+
+            # Get current gas price with a premium for faster confirmation
+            gas_price = w3.eth.gas_price
+            gas_price_with_premium = int(gas_price * 1.5)  # 50% premium
+
+            # Get nonce for the manager's address
+            nonce = w3.eth.get_transaction_count(manager_address)
+            print(f"Current nonce for {manager_address}: {nonce}")
+
+            # Build the transaction
+            tx = contract.functions.approveOpeningGroupManager(opening_id).build_transaction({
+                'from': manager_address,
+                'gas': 2000000,  # Gas limit set to 2,000,000
+                'gasPrice': gas_price_with_premium,
+                'nonce': nonce,
+            })
+
+            # Sign the transaction
+            signed_tx = w3.eth.account.sign_transaction(tx, GROUP_MANAGER_PRIVATE_KEY)
+
+            # Send the transaction
+            tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            tx_hash_hex = tx_hash.hex()
+            print(f"Transaction sent: {tx_hash_hex}")
+
+            # Wait for transaction receipt
+            print(f"Waiting for transaction receipt for {tx_hash_hex}...")
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash_hex, timeout=120)
+            print(f"Transaction receipt received: {receipt}")
+
+            # Calculate actual gas fee
+            gas_used = receipt['gasUsed']
+            gas_price_wei = receipt['effectiveGasPrice']
+            gas_fee = w3.from_wei(gas_used * gas_price_wei, 'ether')
+            print(f"Gas used: {gas_used}, Gas price: {w3.from_wei(gas_price_wei, 'gwei')} Gwei, Total fee: {gas_fee} ETH")
+
+            # Create transaction history entry
+            approval_transaction = {
+                "id": f"tx-{int(time.time())}",
+                "opening_id": opening_id,
+                "type": "Group Manager Approval",
+                "status": "Completed",
+                "timestamp": int(time.time()),
+                "tx_hash": tx_hash_hex,
+                "gas_fee": float(gas_fee),
+                "manager": wallet_address,
+                "details": {
+                    "message": "Group Manager approved opening request",
+                    "gas_used": gas_used,
+                    "gas_price_gwei": float(w3.from_wei(gas_price_wei, 'gwei'))
+                }
+            }
+
+            # Save the transaction
+            save_transaction(approval_transaction)
+
+        elif manager_type == "revocation":
+            # Get the Revocation Manager's private key
+            REVOCATION_MANAGER_PRIVATE_KEY = os.getenv('REVOCATION_MANAGER_PRIVATE_KEY')
+            if not REVOCATION_MANAGER_PRIVATE_KEY:
+                raise ValueError("Missing required environment variable: REVOCATION_MANAGER_PRIVATE_KEY")
+
+            # Create account from private key
+            account = w3.eth.account.from_key(REVOCATION_MANAGER_PRIVATE_KEY)
+            manager_address = account.address
+            print(f"Using Revocation Manager address: {manager_address}")
+
+            # Get current gas price with a premium for faster confirmation
+            gas_price = w3.eth.gas_price
+            gas_price_with_premium = int(gas_price * 1.5)  # 50% premium
+
+            # Get nonce for the manager's address
+            nonce = w3.eth.get_transaction_count(manager_address)
+            print(f"Current nonce for {manager_address}: {nonce}")
+
+            # Build the transaction
+            tx = contract.functions.approveOpeningRevocationManager(opening_id).build_transaction({
+                'from': manager_address,
+                'gas': 2000000,  # Gas limit set to 2,000,000
+                'gasPrice': gas_price_with_premium,
+                'nonce': nonce,
+            })
+
+            # Sign the transaction
+            signed_tx = w3.eth.account.sign_transaction(tx, REVOCATION_MANAGER_PRIVATE_KEY)
+
+            # Send the transaction
+            tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+            tx_hash_hex = tx_hash.hex()
+            print(f"Transaction sent: {tx_hash_hex}")
+
+            # Wait for transaction receipt
+            print(f"Waiting for transaction receipt for {tx_hash_hex}...")
+            receipt = w3.eth.wait_for_transaction_receipt(tx_hash_hex, timeout=120)
+            print(f"Transaction receipt received: {receipt}")
+
+            # Calculate actual gas fee
+            gas_used = receipt['gasUsed']
+            gas_price_wei = receipt['effectiveGasPrice']
+            gas_fee = w3.from_wei(gas_used * gas_price_wei, 'ether')
+            print(f"Gas used: {gas_used}, Gas price: {w3.from_wei(gas_price_wei, 'gwei')} Gwei, Total fee: {gas_fee} ETH")
+
+            # Create transaction history entry
+            approval_transaction = {
+                "id": f"tx-{int(time.time())}",
+                "opening_id": opening_id,
+                "type": "Revocation Manager Approval",
+                "status": "Completed",
+                "timestamp": int(time.time()),
+                "tx_hash": tx_hash_hex,
+                "gas_fee": float(gas_fee),
+                "manager": wallet_address,
+                "details": {
+                    "message": "Revocation Manager approved opening request",
+                    "gas_used": gas_used,
+                    "gas_price_gwei": float(w3.from_wei(gas_price_wei, 'gwei'))
+                }
+            }
+
+            # Save the transaction
+            save_transaction(approval_transaction)
+
         return {
             "status": "success",
             "opening_id": opening_id,
             "computed": True,
             "manager_type": manager_type,
-            "open_result": open_result
+            "open_result": open_result,
+            "transaction_hash": tx_hash_hex,
+            "gas_fee": float(gas_fee)
         }
     except Exception as e:
+        print(f"Error in compute_partial_opening: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/opening/result")
@@ -3167,6 +3877,71 @@ async def get_opening_result(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/ipfs/verify/{cid}")
+async def verify_ipfs_content(cid: str):
+    """
+    Verify if a CID exists in IPFS
+
+    Args:
+        cid: The IPFS CID to verify
+    """
+    try:
+        # Clean the CID
+        clean_cid_value = clean_cid(cid)
+        print(f"Verifying CID: {clean_cid_value}")
+
+        # Check if the CID exists in IPFS
+        from backend.ipfs_cli import verify_ipfs_content as verify_ipfs
+
+        # First check IPFS
+        ipfs_result = verify_ipfs(clean_cid_value)
+
+        # Check multiple possible local storage paths
+        local_paths = [
+            f"local_storage/{clean_cid_value}",
+            f"./local_storage/{clean_cid_value}",
+            f"/app/local_storage/{clean_cid_value}",
+            f"/mnt/c/Users/DrBrand/project/pygroupsig/local_storage/{clean_cid_value}"
+        ]
+
+        local_exists = False
+        local_size = 0
+        local_path = None
+
+        for path in local_paths:
+            if os.path.exists(path):
+                local_exists = True
+                local_size = os.path.getsize(path)
+                local_path = path
+                print(f"Found file in local storage at: {path}")
+                break
+
+        if not local_exists:
+            print(f"File not found in any local storage path. Checked: {local_paths}")
+
+        # Return the results with standardized response format
+        return success_response(data={
+            "ipfs": {
+                "exists": ipfs_result["exists"],
+                "size": ipfs_result.get("size", 0),
+                "error": ipfs_result.get("error", None),
+                "daemon_running": ipfs_result.get("daemon_running", False),
+                "permission_error": ipfs_result.get("permission_error", False),
+                "method": ipfs_result.get("method", "unknown")
+            },
+            "local": {
+                "exists": local_exists,
+                "size": local_size,
+                "path": local_path if local_exists else None,
+                "paths_checked": local_paths
+            },
+            "cid": clean_cid_value,
+            "status": "success",
+            "verified": ipfs_result["exists"] or local_exists
+        })
+    except Exception as e:
+        error_response(str(e), 500)
 
 @app.get("/api/ipfs/view/{cid}")
 async def view_ipfs_content(cid: str, format: str = "raw"):

@@ -12,23 +12,23 @@ from pygroupsig import group, key
 def main():
     """Generate all necessary keys for the group signature system."""
     print("Generating keys for the group signature system...")
-    
+
     # Create keys directory
     os.makedirs("keys", exist_ok=True)
-    
+
     # Step 1: Initialize the group with CPY06 scheme
     g = group("cpy06")()
     g.setup()
-    
+
     # Step 2: Get and save the group public key
     gk_b64 = g.group_key.to_b64()
     print(f"\nGroup public key generated: {gk_b64[:20]}...")
-    
+
     # Save group public key
     with open("keys/group_public_key.b64", "w") as f:
         f.write(gk_b64)
     print("Group public key saved to keys/group_public_key.b64")
-    
+
     # Step 3: Save the group manager's key
     gm_key = {
         "xi1": str(g.manager_key.xi1),
@@ -38,7 +38,7 @@ def main():
     with open("keys/group_manager_key.json", "w") as f:
         json.dump(gm_key, f, indent=2)
     print("Group manager key saved to keys/group_manager_key.json")
-    
+
     # Step 4: Save the revocation manager's key
     rm_key = {
         "xi1": str(g.revocation_manager_key.xi1),
@@ -47,14 +47,39 @@ def main():
     with open("keys/revocation_manager_key.json", "w") as f:
         json.dump(rm_key, f, indent=2)
     print("Revocation manager key saved to keys/revocation_manager_key.json")
-    
-    # Step 5: Create a member (doctor) and save their key
-    mem_key = g.join(g.manager_key)
+
+    # Step 5: Create a member (doctor) and save their key using the join protocol
+    from pygroupsig import key
+
+    # Create a client-side group for the join protocol
+    client_g = group("cpy06")()
+    client_g.group_key.set_b64(gk_b64)
+
+    # Create a member key
+    mem_key = key("cpy06", "member")()
+
+    # Execute the join protocol
+    msg2 = None
+    for i in range(3):  # CPY06 requires 3 steps (0, 1, 2)
+        if i % 2 == 0:
+            # Group manager side
+            msg1 = g.join_mgr(msg2)
+            if msg1["status"] != "success":
+                print(f"Join protocol failed at step {i} (manager): {msg1.get('message', 'Unknown error')}")
+                break
+        else:
+            # Member side
+            msg2 = client_g.join_mem(msg1, mem_key)
+            if msg2["status"] != "success":
+                print(f"Join protocol failed at step {i} (member): {msg2.get('message', 'Unknown error')}")
+                break
+
+    # Save the member key
     mem_key_b64 = mem_key.to_b64()
     with open("keys/doctor_member_key.b64", "w") as f:
         f.write(mem_key_b64)
     print(f"Doctor member key saved to keys/doctor_member_key.b64")
-    
+
     print("\nAll keys generated successfully!")
     print("You can now use the group signature system.")
 

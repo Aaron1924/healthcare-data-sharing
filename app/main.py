@@ -289,6 +289,10 @@ def track_transaction(tx_hash, operation, wallet_address, gas_used=None, gas_pri
     if 'gas_fees' not in st.session_state:
         st.session_state.gas_fees = []
 
+    # Ensure the transaction hash has the 0x prefix
+    if not tx_hash.startswith('0x'):
+        tx_hash = f"0x{tx_hash}"
+
     # Create a transaction record
     tx_record = {
         "tx_hash": tx_hash,
@@ -375,7 +379,11 @@ def render_gas_fees_tab(wallet_address):
         st.subheader("Transaction Links")
         for i, tx in enumerate(st.session_state.gas_fees):
             if 'tx_hash' in tx:
-                st.markdown(f"[{tx.get('operation', 'Transaction')} - {tx.get('timestamp', '')}](https://sepolia.basescan.org/tx/{tx['tx_hash']})")
+                # Ensure the transaction hash has the 0x prefix
+                tx_hash = tx['tx_hash']
+                if not tx_hash.startswith('0x'):
+                    tx_hash = f"0x{tx_hash}"
+                st.markdown(f"[{tx.get('operation', 'Transaction')} - {tx.get('timestamp', '')}](https://sepolia.basescan.org/tx/{tx_hash})")
     else:
         st.info("No gas fees tracked yet. They will appear here after you create records or perform other blockchain transactions.")
 
@@ -1690,7 +1698,6 @@ if "wallet_connected" not in st.session_state:
 def connect_wallet():
     # In a real app, this would use Wallet Connect or similar
     # For demo purposes, we'll simulate a connection
-    st.session_state.wallet_connected = True
 
     # Get the selected account from session state
     selected_account = st.session_state.get("selected_account")
@@ -1702,17 +1709,96 @@ def connect_wallet():
 
     # Get the account info from the TEST_ACCOUNTS dictionary
     account_info = TEST_ACCOUNTS[selected_account]
-    st.session_state.wallet_address = account_info["address"]
-    st.session_state.private_key = account_info["private_key"]
+    wallet_address = account_info["address"]
+    private_key = account_info["private_key"]
 
-    # Set the initial role based on the account type
-    st.session_state.selected_role = account_info["role"]
+    # Generate an authentication challenge
+    try:
+        response = requests.post(
+            f"{API_URL}/auth/challenge",
+            json={"wallet_address": wallet_address}
+        )
 
-    # Debug info
-    print(f"Connected as {selected_account} with role {st.session_state.selected_role}")
+        # If the first URL fails, try the alternative URL
+        if response.status_code == 404:
+            print("Trying alternative API URL...")
+            response = requests.post(
+                f"{API_URL}/api/auth/challenge",
+                json={"wallet_address": wallet_address}
+            )
 
-    # Set a flag to trigger rerun
-    st.session_state.trigger_rerun = True
+        if response.status_code == 200:
+            challenge_data = response.json()
+            challenge = challenge_data.get("challenge")
+
+            # In a real app, this would be signed by the wallet
+            # For demo purposes, we'll simulate signing with the private key
+            message_hash = Web3.keccak(text=challenge)
+            signed_message = w3.eth.account.sign_message(
+                message_hash,
+                private_key=private_key
+            )
+            signature = signed_message.signature.hex()
+
+            # Verify the signature with the backend
+            verify_response = requests.post(
+                f"{API_URL}/auth/verify",
+                json={
+                    "wallet_address": wallet_address,
+                    "signature": signature
+                }
+            )
+
+            # If the first URL fails, try the alternative URL
+            if verify_response.status_code == 404:
+                print("Trying alternative API URL...")
+                verify_response = requests.post(
+                    f"{API_URL}/api/auth/verify",
+                    json={
+                        "wallet_address": wallet_address,
+                        "signature": signature
+                    }
+                )
+
+            if verify_response.status_code == 200:
+                auth_data = verify_response.json()
+                if auth_data.get("authenticated", False):
+                    # Authentication successful
+                    st.session_state.wallet_connected = True
+                    st.session_state.wallet_address = wallet_address
+                    st.session_state.private_key = private_key
+
+                    # Set the role from the authentication response
+                    st.session_state.selected_role = auth_data.get("role", account_info["role"])
+
+                    # Debug info
+                    print(f"Connected as {selected_account} with role {st.session_state.selected_role}")
+
+                    # Set a flag to trigger rerun
+                    st.session_state.trigger_rerun = True
+                else:
+                    st.error(f"Authentication failed: {auth_data.get('message', 'Unknown error')}")
+            else:
+                st.error(f"Error verifying signature: {verify_response.json().get('detail', 'Unknown error')}")
+        else:
+            st.error(f"Error getting authentication challenge: {response.json().get('detail', 'Unknown error')}")
+    except Exception as e:
+        # Fallback to the old method if the authentication API is not available
+        print(f"Error connecting to authentication API: {str(e)}")
+        print("Falling back to direct connection without authentication")
+
+        st.session_state.wallet_connected = True
+        st.session_state.wallet_address = wallet_address
+        st.session_state.private_key = private_key
+
+        # Set the initial role based on the account type
+        st.session_state.selected_role = account_info["role"]
+
+        # Debug info
+        print(f"Connected as {selected_account} with role {st.session_state.selected_role} (fallback)")
+
+        # Set a flag to trigger rerun
+        st.session_state.trigger_rerun = True
 
 # Sidebar for wallet connection
 with st.sidebar:
@@ -1823,6 +1909,29 @@ with st.sidebar:
         st.info(f"Role: {role} - {role_descriptions.get(role, '')}")
 
         if st.button("Disconnect"):
+            # Call the logout API
+            try:
+                response = requests.post(
+                    f"{API_URL}/auth/logout",
+                    json={"wallet_address": st.session_state.wallet_address}
+                )
+
+                # If the first URL fails, try the alternative URL
+                if response.status_code == 404:
+                    print("Trying alternative API URL...")
+                    response = requests.post(
+                        f"{API_URL}/api/auth/logout",
+                        json={"wallet_address": st.session_state.wallet_address}
+                    )
+
+                if response.status_code == 200:
+                    print("Logout successful")
+                else:
+                    print(f"Logout failed: {response.status_code}")
+            except Exception as e:
+                print(f"Error logging out: {str(e)}")
+
+            # Clear session state
             st.session_state.wallet_connected = False
             st.session_state.wallet_address = None
             st.session_state.private_key = None
@@ -2386,7 +2495,7 @@ else:
         with tab4:
             with st.form("purchase_request_form"):
                 template_hash = st.text_input("Template Hash")
-                amount = st.number_input("Escrow Amount (ETH)", min_value=0.01, value=1.0, step=0.1)
+                amount = st.number_input("Escrow Amount (ETH)", min_value=0.0001, value=1.0, step=0.1)
 
                 submit_button = st.form_submit_button("Request Purchase (On-Chain)")
 
@@ -2701,32 +2810,35 @@ else:
             if hasattr(st.session_state, 'opening_requested') and st.session_state.opening_requested:
                 st.subheader("Opening Results")
 
-                if st.button("Check Opening Status"):
-                    # In a real implementation, this would check the blockchain
-                    st.info("Opening request is being processed...")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Check Opening Status"):
+                        # In a real implementation, this would check the blockchain
+                        st.info("Opening request is being processed...")
 
-                if st.button("Retrieve Opening Result"):
-                    # Call API to get opening result
-                    try:
-                        response = requests.get(
-                            f"{API_URL}/opening/result",
-                            params={
-                                "opening_id": st.session_state.opening_id,
-                                "wallet_address": st.session_state.wallet_address
-                            }
-                        )
+                with col2:
+                    if st.button("Retrieve Opening Result"):
+                        # Call API to get opening result
+                        try:
+                            response = requests.get(
+                                f"{API_URL}/opening/result",
+                                params={
+                                    "opening_id": st.session_state.opening_id,
+                                    "wallet_address": st.session_state.wallet_address
+                                }
+                            )
 
-                        if response.status_code == 200:
-                            result = response.json()
-                            st.success("Opening result retrieved successfully!")
+                            if response.status_code == 200:
+                                result = response.json()
+                                st.success("Opening result retrieved successfully!")
 
-                            # Display signer details
-                            st.subheader("Signer Details")
-                            st.json(result["signer_details"])
-                        else:
-                            st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
+                                # Display signer details
+                                st.subheader("Signer Details")
+                                st.json(result["signer_details"])
+                            else:
+                                st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
 
     elif role == "Doctor":
         st.title("Doctor Dashboard")
@@ -2871,18 +2983,32 @@ else:
 
                                             # Display blockchain transaction information
                                             if 'txHash' in store_result:
-                                                st.success(f"Record metadata stored on blockchain with transaction: {store_result['txHash']}")
+                                                # Ensure the transaction hash has the 0x prefix
+                                                tx_hash = store_result['txHash']
+                                                if not tx_hash.startswith('0x'):
+                                                    tx_hash = f"0x{tx_hash}"
+                                                else:
+                                                    tx_hash = store_result['txHash']
+
+                                                st.success(f"Record metadata stored on blockchain with transaction: {tx_hash}")
                                                 # Add a link to the BASE Sepolia block explorer
-                                                st.markdown(f"[View transaction on BASE Sepolia Explorer](https://sepolia.basescan.org/tx/{store_result['txHash']})")
+                                                st.markdown(f"[View transaction on BASE Sepolia Explorer](https://sepolia.basescan.org/tx/{tx_hash})")
 
                                                 # Track the transaction in the session state
                                                 track_transaction(
-                                                    tx_hash=store_result['txHash'],
+                                                    tx_hash=tx_hash,
                                                     operation='Store Record',
                                                     wallet_address=st.session_state.wallet_address,
                                                     gas_used=store_result.get('gasUsed'),
                                                     gas_price=store_result.get('gasPrice')
                                                 )
+
+                                            # Add IPFS verification button
+                                            if 'cid' in store_result:
+                                                st.success(f"Record stored on IPFS with CID: {store_result['cid']}")
+
+                                                # Store the CID in session state for verification after form submission
+                                                st.session_state.last_stored_cid = store_result['cid']
 
                                             st.success("Record encrypted and stored on IPFS!")
 
@@ -2931,6 +3057,76 @@ else:
                                     st.error(f"Error signing record: {response.json().get('detail', 'Unknown error')}")
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
+
+            # Add IPFS verification button outside the form
+            if hasattr(st.session_state, 'last_stored_cid') and st.session_state.last_stored_cid:
+                st.subheader("Verify IPFS Storage")
+                if st.button("Verify IPFS Storage", key=f"verify_{st.session_state.last_stored_cid}"):
+                    try:
+                        # Call the verification endpoint
+                        api_url = API_URL  # Use the configured API URL
+                        verify_response = requests.get(f"{api_url}/api/ipfs/verify/{st.session_state.last_stored_cid}")
+
+                        if verify_response.status_code == 200:
+                            response_data = verify_response.json()
+
+                            # Check if the response has the expected format
+                            if response_data.get('status') == 'success':
+                                verify_result = response_data.get('data', {})
+
+                                # Check if the record was verified in either IPFS or local storage
+                                if verify_result.get('verified', False):
+                                    st.success(f"✅ Record verified! CID: {verify_result.get('cid')}")
+
+                                    # Show details in an expander
+                                    with st.expander("View verification details"):
+                                        # Check IPFS status
+                                        ipfs_status = verify_result.get('ipfs', {})
+                                        if ipfs_status.get('exists', False):
+                                            st.success(f"✅ Verified: CID exists in IPFS ({ipfs_status.get('size', 0)} bytes)")
+                                            st.info(f"Verification method: {ipfs_status.get('method', 'unknown')}")
+                                        else:
+                                            error_msg = ipfs_status.get('error', 'Unknown error')
+                                            st.warning(f"⚠️ Not found in IPFS: {error_msg}")
+
+                                            # If there's a permission error, show a more helpful message
+                                            if ipfs_status.get('permission_error', False) or "permission denied" in str(error_msg).lower():
+                                                st.info("This appears to be a permission issue with the IPFS daemon. The administrator should check the IPFS container configuration.")
+
+                                            # Show daemon status
+                                            if not ipfs_status.get('daemon_running', True):
+                                                st.error("IPFS daemon is not running or not accessible")
+
+                                        # Check local storage status
+                                        local_status = verify_result.get('local', {})
+                                        if local_status.get('exists', False):
+                                            st.success(f"✅ Verified: CID exists in local storage ({local_status.get('size', 0)} bytes)")
+                                            st.info(f"File path: {local_status.get('path', 'unknown')}")
+                                        else:
+                                            st.warning("⚠️ Not found in local storage")
+                                            if 'paths_checked' in local_status:
+                                                st.info(f"Paths checked: {', '.join(local_status.get('paths_checked', []))}")
+                                else:
+                                    st.error("❌ Record could not be verified in IPFS or local storage")
+
+                                    # Show details in an expander
+                                    with st.expander("View verification details"):
+                                        st.json(verify_result)
+                            else:
+                                st.error(f"Error in verification response: {response_data.get('message', 'Unknown error')}")
+                        else:
+                            st.error(f"Error checking IPFS: {verify_response.status_code}")
+                            st.info("The record was still stored successfully, but verification is currently unavailable.")
+
+                            # Try to parse the error response
+                            try:
+                                error_data = verify_response.json()
+                                st.error(f"Error details: {error_data.get('detail', 'No details available')}")
+                            except:
+                                st.error(f"Raw response: {verify_response.text}")
+                    except Exception as e:
+                        st.error(f"Error verifying IPFS storage: {str(e)}")
+                        st.info("The record was still stored successfully, but verification is currently unavailable.")
 
         with tab2:
             st.header("Records Shared with Me")
@@ -3585,7 +3781,7 @@ else:
                 min_records = st.number_input("Minimum number of records", min_value=1, value=10, step=1)
 
                 # Escrow amount
-                amount = st.number_input("Escrow Amount (ETH)", min_value=0.001, value=0.1, step=0.001)
+                amount = st.number_input("Escrow Amount (ETH)", min_value=0.0001, value=0.1, step=0.001)
 
                 submit_button = st.form_submit_button("Submit Request")
 
@@ -4741,8 +4937,9 @@ else:
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
 
-            # Button for on-chain approval
+            # Button for on-chain approval (outside the form)
             if hasattr(st.session_state, 'partial_computed') and st.session_state.partial_computed:
+                st.subheader("Approve Opening")
                 if st.button("Approve Opening (On-Chain)"):
                     # In a real implementation, this would call the smart contract
                     st.success(f"Opening {st.session_state.current_opening_id} approved on-chain!")
@@ -4796,8 +4993,9 @@ else:
                         except Exception as e:
                             st.error(f"Error: {str(e)}")
 
-            # Button for on-chain approval
+            # Button for on-chain approval (outside the form)
             if hasattr(st.session_state, 'partial_computed') and st.session_state.partial_computed:
+                st.subheader("Approve Opening")
                 if st.button("Approve Opening (On-Chain)"):
                     # In a real implementation, this would call the smart contract
                     st.success(f"Opening {st.session_state.current_opening_id} approved on-chain!")
