@@ -1,10 +1,12 @@
 version: '3.8'
 
 services:
-  web:
+  healthcare-web:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: healthcare-web
+    hostname: web
     ports:
       - "8501:8501"
     volumes:
@@ -14,9 +16,9 @@ services:
       - ./artifacts:/app/artifacts
       - ./local_storage:/app/local_storage
     depends_on:
-      - api
+      - healthcare-api
     environment:
-      - API_URL=http://api:8000/api
+      - API_URL=http://healthcare-api:8000/api
       - PYTHONPATH=/app
       - PRIVATE_KEY=${PRIVATE_KEY:-91e5c2bed81b69f9176b6404710914e9bf36a6359122a2d1570116fc6322562e}
       - BASE_RPC_URL=${BASE_RPC_URL:-https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf}
@@ -31,10 +33,12 @@ services:
       timeout: 10s
       retries: 3
 
-  api:
+  healthcare-api:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: healthcare-api
+    hostname: api
     ports:
       - "8000:8000"
     volumes:
@@ -43,6 +47,7 @@ services:
       - ./artifacts:/app/artifacts
       - ./local_storage:/app/local_storage
       - ./test_contract.py:/app/test_contract.py
+      - ./keys:/app/keys
     depends_on:
       - ipfs
     environment:
@@ -55,7 +60,7 @@ services:
     networks:
       - healthcare-network
     restart: unless-stopped
-    command: uvicorn backend.api:app --host 0.0.0.0 --port 8000
+    command: bash -c "python /app/check_keys.py && uvicorn backend.api:app --host 0.0.0.0 --port 8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

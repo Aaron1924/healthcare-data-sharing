@@ -39,15 +39,27 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Install Node.js dependencies
-RUN cd /app && npm install
+# Install Node.js dependencies with retry logic
+RUN cd /app && \
+    for i in 1 2 3 4 5; do \
+        echo "Attempt $i: Installing npm dependencies..." && \
+        npm install && break || \
+        echo "Attempt $i failed! Retrying in 10 seconds..." && \
+        sleep 10; \
+    done
 
-# Compile the smart contract
-RUN cd /app && npm run compile
+# Compile the smart contract with retry logic
+RUN cd /app && \
+    for i in 1 2 3; do \
+        echo "Attempt $i: Compiling smart contracts..." && \
+        npm run compile && break || \
+        echo "Attempt $i failed! Retrying in 5 seconds..." && \
+        sleep 5; \
+    done
 
-# Generate keys for group signature
-RUN mkdir -p /app/keys && \
-    python /app/generate_keys.py
+# Create keys directory but don't generate keys during build
+# Keys will be generated at runtime if they don't exist
+RUN mkdir -p /app/keys
 
 # Expose ports for FastAPI and Streamlit
 EXPOSE 8000 8501
@@ -55,5 +67,8 @@ EXPOSE 8000 8501
 # Set environment variables
 ENV PYTHONPATH=/app
 
-# Command will be overridden by docker-compose
-CMD ["echo", "This command will be overridden by docker-compose"]
+# Make the start script executable
+RUN chmod +x /app/start.sh
+
+# Command to run the start script
+CMD ["/app/start.sh"]
