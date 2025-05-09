@@ -6,8 +6,8 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
-    "deploy:baseSepolia": "hardhat run scripts/deploy.js --network baseSepolia",
-    "verify:baseSepolia": "hardhat verify --network baseSepolia"
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "verify:sepolia": "hardhat verify --network sepolia"
   },
   "keywords": [
     "healthcare",

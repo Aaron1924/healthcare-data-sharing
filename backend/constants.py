@@ -36,7 +36,7 @@ WALLET_ADDRESS = PATIENT_ADDRESS
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA")
 
 # RPC URL
-BASE_SEPOLIA_RPC_URL = os.getenv("BASE_SEPOLIA_RPC_URL", "https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf")
+SEPOLIA_RPC_URL = os.getenv("SEPOLIA_RPC_URL", "https://ethereum-sepolia.publicnode.com")
 
 # IPFS URL
 IPFS_URL = os.getenv("IPFS_URL", "/ip4/127.0.0.1/tcp/5001")

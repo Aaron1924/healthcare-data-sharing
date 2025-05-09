@@ -16,21 +16,21 @@ import sys
 load_dotenv()
 
 # Configuration
-BASE_SEPOLIA_RPC_URL = os.getenv("BASE_RPC_URL", "https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf")
+SEPOLIA_RPC_URL = os.getenv("SEPOLIA_RPC_URL", "https://ethereum-sepolia.publicnode.com")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY", "91e5c2bed81b69f9176b6404710914e9bf36a6359122a2d1570116fc6322562e")
 
 # Initialize Web3
 def init_web3():
-    """Initialize Web3 connection to Base Sepolia"""
-    print("Connecting to Base Sepolia...")
-    w3 = Web3(Web3.HTTPProvider(BASE_SEPOLIA_RPC_URL))
+    """Initialize Web3 connection to Ethereum Sepolia"""
+    print("Connecting to Ethereum Sepolia...")
+    w3 = Web3(Web3.HTTPProvider(SEPOLIA_RPC_URL))
 
     if not w3.is_connected():
-        print("❌ Failed to connect to Base Sepolia")
+        print("❌ Failed to connect to Ethereum Sepolia")
         sys.exit(1)
 
-    print(f"✅ Connected to Base Sepolia")
+    print(f"✅ Connected to Ethereum Sepolia")
     print(f"   Current block number: {w3.eth.block_number}")
     return w3
 
@@ -279,7 +279,7 @@ def test_write_operation(w3, contract):
 
         if balance == 0:
             print("❌ Account has no ETH. Cannot perform transaction.")
-            print("ℹ️ Get testnet ETH from https://faucet.base.org/")
+            print("ℹ️ Get testnet ETH from https://sepoliafaucet.com/")
             return False
 
         # Prepare transaction
@@ -314,9 +314,9 @@ def test_write_operation(w3, contract):
             signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
 
             # Send transaction
-            tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
             print(f"✅ Transaction sent: {tx_hash.hex()}")
-            print(f"ℹ️ View on explorer: https://sepolia.basescan.org/tx/{tx_hash.hex()}")
+            print(f"ℹ️ View on explorer: https://sepolia.etherscan.io/tx/{tx_hash.hex()}")
 
             # Wait for transaction receipt
             print("⏳ Waiting for transaction confirmation...")
@@ -361,9 +361,9 @@ def test_write_operation(w3, contract):
             signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
 
             # Send transaction
-            tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
             print(f"✅ Transaction sent: {tx_hash.hex()}")
-            print(f"ℹ️ View on explorer: https://sepolia.basescan.org/tx/{tx_hash.hex()}")
+            print(f"ℹ️ View on explorer: https://sepolia.etherscan.io/tx/{tx_hash.hex()}")
 
             # Wait for transaction receipt
             print("⏳ Waiting for transaction confirmation...")
@@ -399,7 +399,7 @@ def test_event_listening(w3, contract):
 
         try:
             # Get events
-            events = contract.events.DataStored.get_logs(fromBlock=from_block, toBlock=latest_block)
+            events = contract.events.DataStored.get_logs(from_block=from_block, to_block=latest_block)
 
             if events:
                 print(f"✅ Found {len(events)} DataStored events")
@@ -424,7 +424,7 @@ def test_event_listening(w3, contract):
         # Try RequestOpen events
         try:
             print(f"⏳ Fetching RequestOpen events from block {from_block} to {latest_block}...")
-            request_events = contract.events.RequestOpen.get_logs(fromBlock=from_block, toBlock=latest_block)
+            request_events = contract.events.RequestOpen.get_logs(from_block=from_block, to_block=latest_block)
 
             if request_events:
                 print(f"✅ Found {len(request_events)} RequestOpen events")
@@ -477,8 +477,8 @@ def test_event_listening(w3, contract):
         # If we got here, we didn't find any events but we'll still consider it a success
         # since the read and write operations worked
         print("\nℹ️ No events found, but the contract interaction test is still considered successful")
-        print("ℹ️ You can check the contract on Base Sepolia Explorer:")
-        print(f"ℹ️ https://sepolia.basescan.org/address/{contract.address}")
+        print("ℹ️ You can check the contract on Ethereum Sepolia Explorer:")
+        print(f"ℹ️ https://sepolia.etherscan.io/address/{contract.address}")
 
         return True
 

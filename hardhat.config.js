@@ -8,8 +8,8 @@ require('dotenv').config();
 module.exports = {
   solidity: "0.8.19",
   networks: {
-    baseSepolia: {
-      url: process.env.BASE_SEPOLIA_RPC_URL || "https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf",
+    sepolia: {
+      url: process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia.publicnode.com",
       accounts: [
         // Default deployer account
         process.env.PRIVATE_KEY || "91e5c2bed81b69f9176b6404710914e9bf36a6359122a2d1570116fc6322562e",
@@ -20,7 +20,7 @@ module.exports = {
         // Revocation Manager account
         process.env.REVOCATION_MANAGER_PRIVATE_KEY || "4bf1c7cac1c53c7f7f7ddcc979b159d66a3d2d721fa4053330adbb100be628a0"
       ],
-      chainId: 84532,
+      chainId: 11155111,
     },
     hardhat: {
       accounts: [
@@ -53,17 +53,7 @@ module.exports = {
 
   etherscan: {
     apiKey: {
-      baseSepolia: "I61T8UZK7YKRC8P61BHF6237PG9GC2VK3Y",
+      sepolia: "TZEJMZ7FRUEI3H4YP5VYEFCU3UZ6SZE8J7",
     },
-    customChains: [
-      {
-        network: "baseSepolia",
-        chainId: 84532,
-        urls: {
-          apiURL: "https://api-sepolia.basescan.org/api",
-          browserURL: "https://sepolia.basescan.org",
-        },
-      },
-    ],
   },
 };

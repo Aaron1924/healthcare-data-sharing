@@ -18,10 +18,11 @@ RUN apt-get update && apt-get install -y \
 # Clone and build MCL library
 RUN git clone https://github.com/herumi/mcl.git && \
     cd mcl && \
+    make -j4 && \
     mkdir -p build && \
     cd build && \
     cmake .. && \
-    make && \
+    make -j4 && \
     cd ../..
 
 # Set MCL_LIB_PATH environment variable
@@ -29,6 +30,7 @@ ENV MCL_LIB_PATH=/usr/local/lib/mcl
 
 # Create directory and symlink for MCL library
 RUN mkdir -p /usr/local/lib/mcl && \
+    cp -r /app/mcl/lib/* /usr/local/lib/mcl/ && \
     cp -r /app/mcl/build/lib/* /usr/local/lib/mcl/ && \
     ldconfig
 

@@ -11,7 +11,15 @@ import time
 import random
 import hashlib
 import ipfshttpclient
+import decimal
 from typing import Dict, List, Any, Optional
+
+# Custom JSON encoder to handle Decimal objects
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, decimal.Decimal):
+            return float(obj)
+        return super(DecimalEncoder, self).default(obj)
 
 # Constants
 PATIENT_1_ADDRESS = "0xEDB64f85F1fC9357EcA100C2970f7F84a5faAD4A"
@@ -100,7 +108,7 @@ def create_template_package(records: List[Dict[str, Any]], template: Dict[str, A
 
     for record in records:
         processed_record = {
-            "record_id": record.get("cid", hashlib.sha256(json.dumps(record).encode()).hexdigest()),
+            "record_id": record.get("cid", hashlib.sha256(json.dumps(record, cls=DecimalEncoder).encode()).hexdigest()),
             "category": record.get("category"),
             "date": record.get("date"),
             "demographics": {},
@@ -142,54 +150,26 @@ def create_template_package(records: List[Dict[str, Any]], template: Dict[str, A
     return template_package
 
 def upload_to_ipfs(data: Dict[str, Any]) -> str:
-    """Upload data to IPFS and return the CID."""
-    try:
-        # Try to connect to IPFS
-        ipfs_client = ipfshttpclient.connect('/ip4/127.0.0.1/tcp/5001/http')
+    """Store data in local storage and return the CID (hash)."""
+    # Generate a CID (hash) for the data
+    cid = hashlib.sha256(json.dumps(data, cls=DecimalEncoder).encode()).hexdigest() if not isinstance(data, bytes) else hashlib.sha256(data).hexdigest()
 
-        # Convert data to JSON string if it's not already bytes
-        if not isinstance(data, bytes):
+    # Save to local storage
+    os.makedirs("local_storage", exist_ok=True)
+
+    # Write the data to a file
+    if isinstance(data, bytes):
+        with open(f"local_storage/{cid}", "wb") as f:
+            f.write(data)
+    else:
+        with open(f"local_storage/{cid}", "w") as f:
             if isinstance(data, dict):
-                data = json.dumps(data).encode()
+                json.dump(data, f, cls=DecimalEncoder)
             else:
-                data = str(data).encode()
+                f.write(str(data))
 
-        # Add to IPFS
-        result = ipfs_client.add_bytes(data)
-        cid = result['Hash']
-        print(f"Successfully uploaded to IPFS with CID: {cid}")
-
-        # Pin the content to ensure it stays in IPFS
-        try:
-            ipfs_client.pin.add(cid)
-            print(f"Successfully pinned content with CID: {cid}")
-        except Exception as pin_error:
-            print(f"Warning: Failed to pin content: {str(pin_error)}")
-
-        # Return the CID
-        return cid
-    except Exception as e:
-        print(f"Error uploading to IPFS: {str(e)}")
-
-        # Fallback to local storage
-        cid = hashlib.sha256(json.dumps(data).encode()).hexdigest() if not isinstance(data, bytes) else hashlib.sha256(data).hexdigest()
-
-        # Save to local storage
-        os.makedirs("local_storage", exist_ok=True)
-
-        # Write the data to a file
-        if isinstance(data, bytes):
-            with open(f"local_storage/{cid}", "wb") as f:
-                f.write(data)
-        else:
-            with open(f"local_storage/{cid}", "w") as f:
-                if isinstance(data, dict):
-                    json.dump(data, f)
-                else:
-                    f.write(str(data))
-
-        print(f"Saved to local storage with CID: {cid}")
-        return cid
+    print(f"Saved to local storage with CID: {cid}")
+    return cid
 
 def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_key: Optional[bytes] = None) -> Optional[Dict[str, Any]]:
     """
@@ -271,7 +251,7 @@ def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_k
         except ImportError:
             # Fallback if MerkleService is not available
             print("Warning: MerkleService not available, using hash as Merkle root")
-            master_root = hashlib.sha256(json.dumps(selected_records).encode()).hexdigest()
+            master_root = hashlib.sha256(json.dumps(selected_records, cls=DecimalEncoder).encode()).hexdigest()
             filled_template["merkle_root"] = master_root
             filled_template["merkle_proofs"] = {}
 
@@ -320,7 +300,7 @@ def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_k
                 encryptor = cipher.encryptor()
 
                 # Convert the filled template to JSON
-                plaintext = json.dumps(filled_template).encode()
+                plaintext = json.dumps(filled_template, cls=DecimalEncoder).encode()
 
                 # Encrypt the data
                 ciphertext = encryptor.update(plaintext) + encryptor.finalize()
@@ -335,7 +315,7 @@ def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_k
                 # Fallback to very simple encryption if cryptography is not available
                 print("Warning: cryptography library not available, using very simple encryption")
                 # Simple XOR encryption for demo purposes only
-                plaintext = json.dumps(filled_template).encode()
+                plaintext = json.dumps(filled_template, cls=DecimalEncoder).encode()
                 key_bytes = (temp_key * (len(plaintext) // len(temp_key) + 1))[:len(plaintext)]
                 encrypted_template = bytes([p ^ k for p, k in zip(plaintext, key_bytes)])
                 print(f"Encrypted filled template with simple XOR: {len(encrypted_template)} bytes")
@@ -371,7 +351,7 @@ def auto_fill_template(request_id: str, template: Dict[str, Any], buyer_public_k
         }
 
         # Upload the CERT to IPFS
-        cert_cid = upload_to_ipfs(json.dumps(cert).encode())
+        cert_cid = upload_to_ipfs(json.dumps(cert, cls=DecimalEncoder).encode())
         print(f"Uploaded CERT to IPFS with CID: {cert_cid}")
 
         # Return the result

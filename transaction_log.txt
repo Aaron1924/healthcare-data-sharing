@@ -229,3 +229,73 @@ Operation: Store Record
 Wallet: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 Gas Price: 0.002000576 Gwei
 -----------------------------------
+Timestamp: 2025-05-08 20:04:43
+Transaction: 0x7000eb21d74687aeadf10aae5ab76c9ccf5355269df5c1ed3da4a24338a11a4c
+Explorer Link: https://sepolia.basescan.org/tx/0x7000eb21d74687aeadf10aae5ab76c9ccf5355269df5c1ed3da4a24338a11a4c
+Operation: Store Record
+Wallet: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+Gas Price: 0.002000832 Gwei
+-----------------------------------
+Timestamp: 2025-05-08 20:44:06
+Transaction: 0xb7331d42a0afccc1bc913cb5875c7bb35354d93e3bc23a4f8d685a2295e53f4c
+Explorer Link: https://sepolia.basescan.org/tx/0xb7331d42a0afccc1bc913cb5875c7bb35354d93e3bc23a4f8d685a2295e53f4c
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-05-08 20:54:55
+Transaction: 0x21d71d37c406eb8e7e07ea87d168f369de48c34fd2fef0e03edd94faee0b0c6f
+Explorer Link: https://sepolia.basescan.org/tx/0x21d71d37c406eb8e7e07ea87d168f369de48c34fd2fef0e03edd94faee0b0c6f
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-05-08 21:09:25
+Transaction: 0x26e0c62b01a4e7b451bd0fa281a79e903a6a4a04ad1550a38276b892a9014910
+Explorer Link: https://sepolia.etherscan.io/tx/0x26e0c62b01a4e7b451bd0fa281a79e903a6a4a04ad1550a38276b892a9014910
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-05-08 21:11:49
+Transaction: 0x1485871185f1a907e82946402fb81db6c6837a59202a6864c73e22886f6da376
+Explorer Link: https://sepolia.etherscan.io/tx/0x1485871185f1a907e82946402fb81db6c6837a59202a6864c73e22886f6da376
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-05-08 21:34:25
+Transaction: 0x86e8771eccf7d9854382a67470f8871340ae77e95e5d280eabf1a1df7b09e44d
+Explorer Link: https://sepolia.etherscan.io/tx/0x86e8771eccf7d9854382a67470f8871340ae77e95e5d280eabf1a1df7b09e44d
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-05-08 21:49:01
+Transaction: 0x59ba2d88bffade3072778aba9830a85563a50299a2722ae404487b165af90bc0
+Explorer Link: https://sepolia.etherscan.io/tx/0x59ba2d88bffade3072778aba9830a85563a50299a2722ae404487b165af90bc0
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-05-08 22:23:31
+Transaction: 0xb2e4fddeb6e95d185adb82ad927edd4574e381b286413b8e7579b1e114b374ab
+Explorer Link: https://sepolia.etherscan.io/tx/0xb2e4fddeb6e95d185adb82ad927edd4574e381b286413b8e7579b1e114b374ab
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-05-08 22:29:53
+Transaction: 0x28fa0ea58ede1ef4c091dc5bfb0c77b886c68a34e602de0cdc9d7f4cb24c0671
+Explorer Link: https://sepolia.etherscan.io/tx/0x28fa0ea58ede1ef4c091dc5bfb0c77b886c68a34e602de0cdc9d7f4cb24c0671
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------
+Timestamp: 2025-05-08 22:55:11
+Transaction: 0x2582e72d7837871429c2585b052a6738d474d812a71847aa35a6830dd60ba1bb
+Explorer Link: https://sepolia.etherscan.io/tx/0x2582e72d7837871429c2585b052a6738d474d812a71847aa35a6830dd60ba1bb
+Operation: Purchase Request
+Wallet: 0x3Fa2c09c14453c7acaC39E3fd57e0c6F1da3f5ce
+Gas Used: 80000
+-----------------------------------

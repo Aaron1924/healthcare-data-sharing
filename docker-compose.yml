@@ -8,7 +8,7 @@ services:
       dockerfile: Dockerfile
     container_name: healthcare-web
     ports:
-      - "8501:8501"  # Streamlit UI
+      - "0.0.0.0:8501:8501"  # Streamlit UI - accessible externally
     volumes:
       - ./app:/app/app
       - ./backend:/app/backend
@@ -18,12 +18,12 @@ services:
       - ./keys:/app/keys
     depends_on:
       api:
-        condition: service_healthy
+        condition: service_started
     environment:
       - API_URL=http://api:8000/api
       - PYTHONPATH=/app
       - PRIVATE_KEY=${PRIVATE_KEY:-91e5c2bed81b69f9176b6404710914e9bf36a6359122a2d1570116fc6322562e}
-      - BASE_RPC_URL=${BASE_RPC_URL:-https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf}
+      - SEPOLIA_RPC_URL=${SEPOLIA_RPC_URL:-https://ethereum-sepolia.publicnode.com}
       - CONTRACT_ADDRESS=${CONTRACT_ADDRESS:-0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA}
       - DOCTOR_PRIVATE_KEY=${DOCTOR_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
       - PATIENT_PRIVATE_KEY=${PATIENT_PRIVATE_KEY:-0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d}
@@ -49,7 +49,7 @@ services:
       dockerfile: Dockerfile
     container_name: healthcare-api
     ports:
-      - "8000:8000"  # FastAPI
+      - "0.0.0.0:8000:8000"  # FastAPI - accessible externally
     volumes:
       - ./backend:/app/backend
       - ./pygroupsig:/app/pygroupsig
@@ -58,10 +58,12 @@ services:
       - ./keys:/app/keys
     depends_on:
       ipfs:
-        condition: service_healthy
+        condition: service_started
     environment:
       - IPFS_URL=http://ipfs:5001
-      - BASE_RPC_URL=${BASE_RPC_URL:-https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf}
+      - IPFS_API_HOST=ipfs
+      - IPFS_API_PORT=5001
+      - SEPOLIA_RPC_URL=${SEPOLIA_RPC_URL:-https://ethereum-sepolia.publicnode.com}
       - CONTRACT_ADDRESS=${CONTRACT_ADDRESS:-0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA}
       - PRIVATE_KEY=${PRIVATE_KEY:-91e5c2bed81b69f9176b6404710914e9bf36a6359122a2d1570116fc6322562e}
       - MCL_LIB_PATH=/usr/local/lib/mcl
@@ -72,37 +74,64 @@ services:
       - GROUP_MANAGER_PRIVATE_KEY=${GROUP_MANAGER_PRIVATE_KEY:-0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6}
       - REVOCATION_MANAGER_PRIVATE_KEY=${REVOCATION_MANAGER_PRIVATE_KEY:-0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a}
       - BUYER_PRIVATE_KEY=${BUYER_PRIVATE_KEY:-0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-TZEJMZ7FRUEI3H4YP5VYEFCU3UZ6SZE8J7}
     networks:
       - healthcare-network
     restart: unless-stopped
-    command: uvicorn backend.api:app --host 0.0.0.0 --port 8000 --reload
+    command: >
+      sh -c "
+        # Wait for IPFS to be fully ready
+        echo 'Waiting for IPFS to be ready...'
+        sleep 15
+
+        # Create necessary directories
+        mkdir -p /app/local_storage/records
+        mkdir -p /app/local_storage/purchases
+        mkdir -p /app/local_storage/transactions
+        mkdir -p /app/local_storage/store_transactions
+        mkdir -p /app/local_storage/share_transactions
+        mkdir -p /app/local_storage/purchase_transactions
+
+        # Check if MCL library is properly installed
+        echo 'Checking MCL library...'
+        ls -la /usr/local/lib/mcl || true
+        echo 'Checking MCL library in alternate location...'
+        ls -la /app/mcl/lib || true
+        echo 'Checking MCL library in build location...'
+        ls -la /app/mcl/build/lib || true
+
+        # Start the API server
+        echo 'Starting API server...'
+        # Use a simple approach without reload to ensure stability
+        uvicorn backend.api:app --host 0.0.0.0 --port 8000
+      "
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/docs || exit 0"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+      test: ["CMD-SHELL", "curl -s http://localhost:8000/ || exit 0"]
+      interval: 60s
+      timeout: 30s
+      retries: 10
+      start_period: 120s
 
   # IPFS Node
   ipfs:
-    image: ipfs/kubo:latest
+    image: ipfs/kubo:v0.22.0
     container_name: ipfs-node
     ports:
-      - "4001:4001"  # IPFS swarm
-      - "5001:5001"  # IPFS API
-      - "8080:8080"  # IPFS Gateway
+      - "0.0.0.0:4001:4001"  # IPFS swarm - accessible externally
+      - "0.0.0.0:5001:5001"  # IPFS API - accessible externally
+      - "0.0.0.0:8080:8080"  # IPFS Gateway - accessible externally
     volumes:
-      - ipfs-data:/data/ipfs
+      - ./ipfs-data:/data/ipfs
       - ./local_storage:/export
     environment:
       - IPFS_PROFILE=server
-      - IPFS_PATH=/data/ipfs
     networks:
       - healthcare-network
     restart: unless-stopped
-    # Use the default entrypoint and command
+    entrypoint: ["/sbin/tini", "--", "/usr/local/bin/start_ipfs"]
+    command: ["daemon", "--migrate=true"]
     healthcheck:
-      test: ["CMD-SHELL", "ipfs id || exit 0"]
+      test: ["CMD-SHELL", "ipfs --api=/ip4/127.0.0.1/tcp/5001 id || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -111,7 +140,3 @@ services:
 networks:
   healthcare-network:
     driver: bridge
-
-volumes:
-  ipfs-data:
-    driver: local

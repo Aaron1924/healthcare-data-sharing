@@ -1,12 +1,12 @@
 # Decentralized Healthcare Data Sharing Platform
 
-A blockchain-based platform for secure healthcare data sharing using group signatures and IPFS, deployed on the BASE Sepolia testnet.
+A blockchain-based platform for secure healthcare data sharing using group signatures and IPFS, deployed on the Ethereum Sepolia testnet.
 
 ## Features
 
 - **Secure Storage**: Healthcare records are encrypted and stored on IPFS
 - **Privacy-Preserving Authentication**: Group signatures ensure doctor anonymity while maintaining verifiability
-- **Blockchain Integration**: Smart contracts on BASE Sepolia testnet for access control and data sharing
+- **Blockchain Integration**: Smart contracts on Ethereum Sepolia testnet for access control and data sharing
 - **Three Core Workflows**:
   - **Storing**: Doctors create and sign records, patients store them
   - **Sharing**: Patients share records with specific doctors
@@ -17,7 +17,7 @@ A blockchain-based platform for secure healthcare data sharing using group signa
 - [Docker](https://docs.docker.com/get-docker/)
 - [Docker Compose](https://docs.docker.com/compose/install/)
 - [Git](https://git-scm.com/downloads)
-- [BASE Sepolia Testnet ETH](https://www.coinbase.com/faucets/base-sepolia-faucet) (for blockchain transactions)
+- [Ethereum Sepolia Testnet ETH](https://sepoliafaucet.com/) (for blockchain transactions)
 
 ## Running the Project with Docker
 
@@ -39,7 +39,7 @@ nano .env
 ```
 
 Important variables to configure:
-- `BASE_RPC_URL`: Your BASE Sepolia RPC URL (get from Coinbase Cloud or other providers)
+- `SEPOLIA_RPC_URL`: Your Ethereum Sepolia RPC URL (get from Infura, Alchemy, or other providers)
 - `PRIVATE_KEY`: Your wallet's private key for contract deployment
 - Test account private keys (if you want to use different accounts)
 
@@ -58,10 +58,21 @@ docker-compose up -d
 
 ### 4. Access the Application
 
+#### Local Access
+
 - **Web UI**: [http://localhost:8501](http://localhost:8501)
 - **API**: [http://localhost:8000](http://localhost:8000)
 - **API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **IPFS Interface**: [http://localhost:8080/webui](http://localhost:8080/webui)
+- **IPFS Interface**: [http://localhost:5001/webui](http://localhost:5001/webui)
+
+#### External Access
+
+The application is configured to be accessible from other machines on your network. See [EXTERNAL_ACCESS.md](EXTERNAL_ACCESS.md) for detailed instructions on how to:
+
+- Configure your firewall
+- Find your server's IP address
+- Share access with others
+- Set up security measures
 
 ### 5. Stop the Containers
 
@@ -146,7 +157,7 @@ The project uses Solidity smart contracts deployed on the BASE Sepolia testnet:
 
 ### Testing Smart Contract Interaction
 
-To test that your smart contract can interact with the Base Sepolia blockchain:
+To test that your smart contract can interact with the Ethereum Sepolia blockchain:
 
 ```bash
 # Make the test script executable
@@ -163,7 +174,7 @@ This will:
 4. Test read operations, write operations, and event listening
 
 The test script will:
-- Connect to the Base Sepolia testnet
+- Connect to the Ethereum Sepolia testnet
 - Load your contract ABI from the artifacts directory
 - Test reading from the contract (groupManager, revocationManager, seq)
 - Test writing to the contract (request or storeData)
@@ -187,13 +198,13 @@ When running in WSL with Docker, the paths to the contract artifacts need to be 
 - WSL path: `/mnt/c/Users/pkhoa/OneDrive - VNU-HCMUS/Documents/SCHOOL/Khoá luận/main/healthcare-data-sharing/artifacts`
 - Docker container path: `/app/artifacts` (as mounted in docker-compose.yml)
 
-#### Base Sepolia Blockchain Limitations
+#### Ethereum Sepolia Blockchain Limitations
 
-When testing with the Base Sepolia testnet, be aware of these limitations:
+When testing with the Ethereum Sepolia testnet, be aware of these limitations:
 
-- **Event Query Limit**: Base Sepolia limits event queries to at most 1000 blocks. The test script handles this by limiting queries to 500 blocks.
+- **Event Query Limit**: Ethereum Sepolia limits event queries to at most 1000 blocks. The test script handles this by limiting queries to 500 blocks.
 - **Gas Costs**: Some functions (like `request()`) require sending ETH along with the transaction. The test script will fall back to using `storeData()` if there are insufficient funds.
-- **Rate Limiting**: Public RPC endpoints may have rate limiting. If you encounter issues, consider using a dedicated RPC provider.
+- **Rate Limiting**: Public RPC endpoints may have rate limiting. If you encounter issues, consider using a dedicated RPC provider like Infura or Alchemy.
 
 ### Testing MCL and Group Signatures
 
@@ -309,18 +320,18 @@ If you encounter issues with blockchain transactions:
 
 ```bash
 # Check the balance of the wallet used for transactions
-docker-compose exec api python -c "from web3 import Web3; import os; w3 = Web3(Web3.HTTPProvider(os.getenv('BASE_RPC_URL'))); print(f'Balance: {w3.from_wei(w3.eth.get_balance(os.getenv(\"WALLET_ADDRESS\")), \"ether\")} ETH')"
+docker-compose exec api python -c "from web3 import Web3; import os; w3 = Web3(Web3.HTTPProvider(os.getenv('SEPOLIA_RPC_URL'))); print(f'Balance: {w3.from_wei(w3.eth.get_balance(os.getenv(\"WALLET_ADDRESS\")), \"ether\")} ETH')"
 ```
 
 2. **Get testnet ETH**:
-   - Visit [BASE Sepolia Faucet](https://www.coinbase.com/faucets/base-sepolia-faucet)
+   - Visit [Ethereum Sepolia Faucet](https://sepoliafaucet.com/)
    - Request ETH for your wallet addresses (doctor, patient, buyer, etc.)
 
 3. **Check contract deployment**:
 
 ```bash
 # Verify the contract exists at the specified address
-docker-compose exec api python -c "from web3 import Web3; import os; import json; w3 = Web3(Web3.HTTPProvider(os.getenv('BASE_RPC_URL'))); addr = os.getenv('CONTRACT_ADDRESS'); print(f'Contract code exists: {w3.eth.get_code(addr).hex() != \"0x\"}')"
+docker-compose exec api python -c "from web3 import Web3; import os; import json; w3 = Web3(Web3.HTTPProvider(os.getenv('SEPOLIA_RPC_URL'))); addr = os.getenv('CONTRACT_ADDRESS'); print(f'Contract code exists: {w3.eth.get_code(addr).hex() != \"0x\"}')"
 ```
 
 ### Docker Permission Issues
@@ -336,7 +347,7 @@ newgrp docker
 ### Common Error Messages
 
 1. **"Insufficient funds for gas * price + value"**:
-   - Solution: Get more testnet ETH from the [BASE Sepolia Faucet](https://www.coinbase.com/faucets/base-sepolia-faucet)
+   - Solution: Get more testnet ETH from the [Ethereum Sepolia Faucet](https://sepoliafaucet.com/)
 
 2. **"Error loading plugins: open /var/ipfs/config: permission denied"**:
    - Solution: Reset the IPFS container and data as described above

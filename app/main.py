@@ -14,6 +14,7 @@ import datetime
 import time
 import base64
 import hashlib
+import pandas as pd
 from web3 import Web3
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
@@ -33,20 +34,20 @@ load_dotenv()
 # API endpoint
 API_URL = os.getenv("API_URL", "http://localhost:8000/api")
 
-# Base Sepolia testnet connection via Coinbase Cloud
-BASE_SEPOLIA_RPC_URL = os.getenv("BASE_SEPOLIA_RPC_URL", "https://api.developer.coinbase.com/rpc/v1/base-sepolia/TU79b5nxSoHEPVmNhElKsyBqt9CUbNTf")
+# Ethereum Sepolia testnet connection
+SEPOLIA_RPC_URL = os.getenv("SEPOLIA_RPC_URL", "https://ethereum-sepolia.publicnode.com")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS", "0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA")
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS", "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")
 
-# Initialize Web3 with Coinbase Cloud RPC
-w3 = Web3(Web3.HTTPProvider(BASE_SEPOLIA_RPC_URL))
+# Initialize Web3 with Ethereum Sepolia RPC
+w3 = Web3(Web3.HTTPProvider(SEPOLIA_RPC_URL))
 
-# DataHub contract address on BASE Sepolia
+# DataHub contract address on Ethereum Sepolia
 DATAHUB_CONTRACT_ADDRESS = os.getenv("DATAHUB_CONTRACT_ADDRESS", "0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA")
 
-# Function to fetch contract transactions from Basescan
+# Function to fetch contract transactions from Etherscan
 def fetch_contract_transactions():
-    """Fetch recent transactions for the DataHub contract from Basescan
+    """Fetch recent transactions for the DataHub contract from Etherscan
 
     Returns:
         list: Recent transactions involving the DataHub contract
@@ -55,7 +56,7 @@ def fetch_contract_transactions():
         # Get transactions to/from the contract
         contract_address = DATAHUB_CONTRACT_ADDRESS
 
-        # We'll simulate fetching from Basescan API (in a real implementation, you would use their API)
+        # We'll simulate fetching from Etherscan API (in a real implementation, you would use their API)
         # For demo purposes, we'll return mock data that resembles real transactions
         transactions = [
             {
@@ -124,9 +125,104 @@ def fetch_contract_transactions():
         print(f"Error fetching contract transactions: {str(e)}")
         return []
 
-# Function to fetch real-time gas prices from BASE Sepolia
-def fetch_base_gas_prices():
-    """Fetch current gas prices from BASE Sepolia network
+# Function to fetch wallet balance from Sepolia Etherscan API
+def fetch_wallet_balance_from_etherscan(wallet_address):
+    """Fetch wallet balance from Sepolia Etherscan API
+
+    Args:
+        wallet_address (str): The wallet address to check
+
+    Returns:
+        float: Balance in ETH, or None if the API call fails
+    """
+    try:
+        # Get Etherscan API key from environment variables
+        ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "TZEJMZ7FRUEI3H4YP5VYEFCU3UZ6SZE8J7")
+
+        # Sepolia Etherscan API endpoint for account balance
+        # According to https://docs.etherscan.io/getting-started/endpoint-urls
+        url = f"https://api-sepolia.etherscan.io/api?module=account&action=balance&address={wallet_address}&tag=latest&apikey={ETHERSCAN_API_KEY}"
+
+        print(f"Fetching balance from Sepolia Etherscan API: {url}")
+
+        # Make the request
+        response = requests.get(url, timeout=10)
+
+        # Check if the request was successful
+        if response.status_code == 200:
+            data = response.json()
+            print(f"Etherscan API response: {data}")
+
+            # Check for success in the response
+            if data.get("status") == "1" and "result" in data:
+                # Convert string to int and then to ETH
+                balance_wei = int(data["result"])
+                balance_eth = w3.from_wei(balance_wei, 'ether')
+                print(f"Got balance for {wallet_address} from Sepolia Etherscan: {balance_wei} wei ({balance_eth} ETH)")
+                return float(balance_eth)
+            else:
+                error_msg = data.get('message', 'Unknown error')
+                print(f"Sepolia Etherscan API error: {error_msg}")
+                print(f"Response: {data}")
+
+                # Try fallback to Ethereum Sepolia RPC
+                print("Falling back to Ethereum Sepolia RPC for wallet balance")
+                return fetch_wallet_balance_from_sepolia(wallet_address)
+        else:
+            print(f"Sepolia Etherscan API HTTP error: {response.status_code}, Response: {response.text}")
+
+            # Try fallback to Ethereum Sepolia RPC
+            print("Falling back to Ethereum Sepolia RPC for wallet balance due to HTTP error")
+            return fetch_wallet_balance_from_sepolia(wallet_address)
+    except Exception as e:
+        print(f"Error getting wallet balance from Sepolia Etherscan: {str(e)}")
+
+        # Try fallback to Ethereum Sepolia RPC
+        print("Falling back to Ethereum Sepolia RPC for wallet balance due to exception")
+        return fetch_wallet_balance_from_sepolia(wallet_address)
+
+# Function to fetch wallet balance from Ethereum Sepolia testnet
+def fetch_wallet_balance_from_sepolia(wallet_address):
+    """Fetch wallet balance directly from Ethereum Sepolia testnet
+
+    Args:
+        wallet_address (str): The wallet address to check
+
+    Returns:
+        float: Balance in ETH, or None if the API call fails
+    """
+    try:
+        # Make sure we're using the Ethereum Sepolia RPC
+        sepolia_rpc = os.getenv("SEPOLIA_RPC_URL", "https://ethereum-sepolia.publicnode.com")
+
+        # Create a new Web3 instance specifically for this request to ensure we're using the right network
+        sepolia_w3 = Web3(Web3.HTTPProvider(sepolia_rpc))
+
+        if not sepolia_w3.is_connected():
+            print(f"Could not connect to Ethereum Sepolia RPC at {sepolia_rpc}")
+            return None
+
+        # Get the balance
+        balance_wei = sepolia_w3.eth.get_balance(wallet_address)
+        balance_eth = sepolia_w3.from_wei(balance_wei, 'ether')
+        print(f"Got balance for {wallet_address} from Ethereum Sepolia: {balance_wei} wei ({balance_eth} ETH)")
+        return float(balance_eth)
+    except Exception as e:
+        print(f"Error getting wallet balance from Ethereum Sepolia: {str(e)}")
+
+        # Try using the existing web3 instance as fallback
+        try:
+            balance_wei = w3.eth.get_balance(wallet_address)
+            balance_eth = w3.from_wei(balance_wei, 'ether')
+            print(f"Got balance for {wallet_address} from fallback web3: {balance_wei} wei ({balance_eth} ETH)")
+            return float(balance_eth)
+        except Exception as fallback_error:
+            print(f"Error getting fallback balance: {str(fallback_error)}")
+            return None
+
+# Function to fetch real-time gas prices from Ethereum Sepolia
+def fetch_sepolia_gas_prices():
+    """Fetch current gas prices from Ethereum Sepolia network
 
     Returns:
         dict: Gas price information including base fee, priority fee estimates, and gas price in Gwei
@@ -165,7 +261,7 @@ def fetch_base_gas_prices():
             contract_deployed = True
 
         return {
-            "network": "BASE Sepolia",
+            "network": "Ethereum Sepolia",
             "block_number": latest_block.number,
             "base_fee_gwei": round(base_fee_gwei, 2),
             "gas_price_gwei": round(gas_price_gwei, 2),
@@ -203,7 +299,7 @@ def fetch_base_gas_prices():
         print(f"Error fetching gas prices: {str(e)}")
         # Return fallback values if there's an error
         return {
-            "network": "BASE Sepolia",
+            "network": "Ethereum Sepolia",
             "error": str(e),
             "base_fee_gwei": 0.1,
             "gas_price_gwei": 0.5,
@@ -227,19 +323,63 @@ contract = w3.eth.contract(address=w3.to_checksum_address(CONTRACT_ADDRESS), abi
 # Streamlit app
 # Page config is already set at the top of the file
 
-# Display Base Sepolia connection status
+# Display Ethereum Sepolia connection status
 if w3.is_connected():
-    st.sidebar.success(f"Connected to Base Sepolia via Coinbase Cloud")
+    # Get the RPC URL from environment variables
+    sepolia_rpc = os.getenv("SEPOLIA_RPC_URL", "https://ethereum-sepolia.publicnode.com")
+    rpc_provider = "Public Node" if "publicnode" in sepolia_rpc else "Custom RPC"
+
+    st.sidebar.success(f"Connected to Ethereum Sepolia via {rpc_provider}")
     st.sidebar.info(f"Latest block: {w3.eth.block_number}")
 
-    # Check wallet balance
+    # Check wallet balance using Sepolia Etherscan API first, then fallback to Base Sepolia RPC
     try:
-        balance = w3.eth.get_balance(WALLET_ADDRESS)
-        st.sidebar.info(f"Wallet balance: {w3.from_wei(balance, 'ether')} ETH")
+        # Create an expandable section for wallet details
+        with st.sidebar.expander("Wallet Details", expanded=True):
+            st.write(f"**Address**: {WALLET_ADDRESS[:8]}...{WALLET_ADDRESS[-6:]}")
+
+            # Add a button to refresh balance
+            if st.button("Refresh Balance", key="refresh_balance"):
+                st.session_state.refresh_balance = True
+
+            # First try to get balance from Sepolia Etherscan API
+            etherscan_balance = fetch_wallet_balance_from_etherscan(WALLET_ADDRESS)
+            if etherscan_balance is not None:
+                # Display balance with a metric widget for better visibility
+                st.metric(
+                    label="Wallet Balance (via Etherscan)",
+                    value=f"{etherscan_balance:.6f} ETH",
+                    help="Balance retrieved from Sepolia Etherscan API"
+                )
+
+                # Add a link to view on Etherscan
+                st.markdown(f"[View on Etherscan](https://sepolia.etherscan.io/address/{WALLET_ADDRESS})")
+            else:
+                # Fallback to Base Sepolia RPC
+                base_sepolia_balance = fetch_wallet_balance_from_base_sepolia(WALLET_ADDRESS)
+                if base_sepolia_balance is not None:
+                    st.metric(
+                        label="Wallet Balance (Base Sepolia)",
+                        value=f"{base_sepolia_balance:.6f} ETH",
+                        help="Balance retrieved directly from Base Sepolia RPC"
+                    )
+
+                    # Add a link to view on Basescan
+                    st.markdown(f"[View on Basescan](https://sepolia.basescan.org/address/{WALLET_ADDRESS})")
+                else:
+                    # Last resort: fallback to web3 balance check
+                    balance = w3.eth.get_balance(WALLET_ADDRESS)
+                    balance_eth = w3.from_wei(balance, 'ether')
+                    st.metric(
+                        label="Wallet Balance",
+                        value=f"{float(balance_eth):.6f} ETH",
+                        help="Balance retrieved from local Web3 provider"
+                    )
     except Exception as e:
         st.sidebar.warning(f"Could not fetch wallet balance: {e}")
+        st.sidebar.error("Please check your network connection and try again.")
 else:
-    st.sidebar.error("Not connected to Base Sepolia")
+    st.sidebar.error("Not connected to Ethereum Sepolia")
 
 # Define test accounts - one for each role
 TEST_ACCOUNTS = {
@@ -299,7 +439,7 @@ def track_transaction(tx_hash, operation, wallet_address, gas_used=None, gas_pri
         "operation": operation,
         "wallet_address": wallet_address,
         "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-        "explorer_link": f"https://sepolia.basescan.org/tx/{tx_hash}"
+        "explorer_link": f"https://sepolia.etherscan.io/tx/{tx_hash}"
     }
 
     # Add gas information if available
@@ -310,7 +450,6 @@ def track_transaction(tx_hash, operation, wallet_address, gas_used=None, gas_pri
         tx_record["gas_price"] = gas_price
         if gas_used is not None:
             # Calculate the cost in ETH
-            from web3 import Web3
             cost_wei = gas_used * gas_price
             cost_eth = Web3.from_wei(cost_wei, 'ether')
             tx_record["cost_eth"] = cost_eth
@@ -329,10 +468,8 @@ def track_transaction(tx_hash, operation, wallet_address, gas_used=None, gas_pri
             if gas_used is not None:
                 log_file.write(f"\nGas Used: {gas_used}")
             if gas_price is not None:
-                from web3 import Web3
                 log_file.write(f"\nGas Price: {Web3.from_wei(gas_price, 'gwei')} Gwei")
             if gas_used is not None and gas_price is not None:
-                from web3 import Web3
                 cost_wei = gas_used * gas_price
                 cost_eth = Web3.from_wei(cost_wei, 'ether')
                 log_file.write(f"\nCost: {cost_eth} ETH")
@@ -349,100 +486,227 @@ def render_gas_fees_tab(wallet_address):
     """
     st.header("Gas Fees and Transaction Costs")
 
-    # Initialize gas fees tracking if not already done
-    if 'gas_fees' not in st.session_state:
-        st.session_state.gas_fees = []
+    # Create tabs for different sections
+    fees_tab, wallet_tab, gas_prices_tab = st.tabs(["Transaction History", "Wallet Balance", "Gas Prices"])
 
-    # Display gas fees tracking
-    if st.session_state.gas_fees:
-        # Create a DataFrame from the gas fees
-        import pandas as pd
-        df = pd.DataFrame(st.session_state.gas_fees)
+    with wallet_tab:
+        st.subheader("Wallet Balance Information")
 
-        # Display the DataFrame
-        st.subheader("Transaction History")
-        st.dataframe(df, use_container_width=True)
+        # Display wallet address with copy button
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.text_input("Wallet Address", wallet_address, disabled=True)
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)  # Add some spacing
+            if st.button("Copy Address"):
+                st.toast("Address copied to clipboard!")
 
-        # Add export functionality
-        if st.button("Export Gas Fees to CSV"):
-            # Convert DataFrame to CSV
-            csv = df.to_csv(index=False)
-            # Create a download button
-            st.download_button(
-                label="Download CSV",
-                data=csv,
-                file_name="gas_fees.csv",
-                mime="text/csv"
+        # Add a button to check balance
+        if st.button("Check Balance on Etherscan"):
+            with st.spinner("Fetching wallet balance..."):
+                # Get balance from Etherscan API
+                etherscan_balance = fetch_wallet_balance_from_etherscan(wallet_address)
+                if etherscan_balance is not None:
+                    st.success(f"Balance retrieved successfully from Etherscan!")
+                    st.metric(
+                        label="Wallet Balance",
+                        value=f"{etherscan_balance:.6f} ETH",
+                        help="Balance retrieved from Sepolia Etherscan API"
+                    )
+                else:
+                    st.error("Could not retrieve balance from Etherscan. Trying Ethereum Sepolia RPC...")
+                    # Fallback to Ethereum Sepolia RPC
+                    sepolia_balance = fetch_wallet_balance_from_sepolia(wallet_address)
+                    if sepolia_balance is not None:
+                        st.success("Balance retrieved from Ethereum Sepolia RPC!")
+                        st.metric(
+                            label="Wallet Balance",
+                            value=f"{sepolia_balance:.6f} ETH",
+                            help="Balance retrieved directly from Ethereum Sepolia RPC"
+                        )
+                    else:
+                        st.error("Could not retrieve wallet balance. Please try again later.")
+
+        # Add links to view on explorers
+        st.subheader("View on Block Explorers")
+        st.markdown(f"[View on Etherscan](https://sepolia.etherscan.io/address/{wallet_address})")
+
+    with fees_tab:
+        # Initialize gas fees tracking if not already done
+        if 'gas_fees' not in st.session_state:
+            st.session_state.gas_fees = []
+
+        # Display gas fees tracking
+        if st.session_state.gas_fees:
+            # Create a DataFrame from the gas fees
+
+            # Clean the data before creating the DataFrame
+            clean_gas_fees = []
+            for fee in st.session_state.gas_fees:
+                # Create a copy of the fee dictionary
+                clean_fee = fee.copy()
+
+                # Convert 'N/A' strings to None for numeric columns
+                for key in ['gas_fee', 'gas_used', 'gas_price']:
+                    if key in clean_fee and isinstance(clean_fee[key], str) and clean_fee[key] == 'N/A':
+                        clean_fee[key] = None
+
+                # Ensure all numeric values are properly typed
+                if 'gas_fee' in clean_fee and clean_fee['gas_fee'] is not None:
+                    try:
+                        clean_fee['gas_fee'] = float(clean_fee['gas_fee'])
+                    except (ValueError, TypeError):
+                        clean_fee['gas_fee'] = None
+
+                clean_gas_fees.append(clean_fee)
+
+            # Create DataFrame with cleaned data
+            df = pd.DataFrame(clean_gas_fees)
+
+            # Display the DataFrame
+            st.subheader("Transaction History")
+            st.dataframe(df, use_container_width=True)
+
+            # Add export functionality
+            if st.button("Export Gas Fees to CSV"):
+                # Convert DataFrame to CSV
+                csv = df.to_csv(index=False)
+                # Create a download button
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name="gas_fees.csv",
+                    mime="text/csv"
+                )
+
+            # Add links to transactions
+            st.subheader("Transaction Links")
+            for i, tx in enumerate(st.session_state.gas_fees):
+                if 'tx_hash' in tx:
+                    # Ensure the transaction hash has the 0x prefix
+                    tx_hash = tx['tx_hash']
+                    if not tx_hash.startswith('0x'):
+                        tx_hash = f"0x{tx_hash}"
+                    st.markdown(f"[{tx.get('operation', 'Transaction')} - {tx.get('timestamp', '')}](https://sepolia.etherscan.io/tx/{tx_hash})")
+        else:
+            st.info("No gas fees tracked yet. They will appear here after you create records or perform other blockchain transactions.")
+
+    with gas_prices_tab:
+        st.subheader("Real-Time Gas Prices")
+
+        # Add a button to fetch real-time gas prices
+        if st.button("Fetch Current Gas Prices", key="fetch_gas_prices_tab"):
+            with st.spinner("Fetching current gas prices..."):
+                try:
+                    # Get gas prices from Etherscan API
+
+                    # Get Etherscan API key from environment variables
+                    ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "TZEJMZ7FRUEI3H4YP5VYEFCU3UZ6SZE8J7")
+
+                    # Etherscan API endpoint for gas price
+                    url = f"https://api-sepolia.etherscan.io/api?module=proxy&action=eth_gasPrice&apikey={ETHERSCAN_API_KEY}"
+
+                    # Make the request
+                    response = requests.get(url, timeout=10)
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        if "result" in data:
+                            # Convert hex string to int
+                            gas_price_wei = int(data["result"], 16)
+                            gas_price_gwei = w3.from_wei(gas_price_wei, 'gwei')
+
+                            st.success("Gas price retrieved successfully from Etherscan!")
+                            st.metric(
+                                label="Current Gas Price",
+                                value=f"{float(gas_price_gwei):.2f} Gwei",
+                                help="Gas price retrieved from Sepolia Etherscan API"
+                            )
+
+                            # Calculate costs for different operations
+                            operations = {
+                                "Simple ETH Transfer": 21000,
+                                "ERC-20 Token Transfer": 65000,
+                                "Smart Contract Interaction": 100000,
+                                "NFT Minting": 150000,
+                                "Complex Contract Deployment": 1000000
+                            }
+
+                            # Create a table of costs
+                            cost_data = []
+                            for op_name, gas_units in operations.items():
+                                cost_wei = gas_units * gas_price_wei
+                                cost_eth = w3.from_wei(cost_wei, 'ether')
+                                cost_data.append({
+                                    "Operation": op_name,
+                                    "Gas Units": f"{gas_units:,}",
+                                    "Cost (ETH)": f"{float(cost_eth):.6f}"
+                                })
+
+                            # Display as DataFrame
+                            cost_df = pd.DataFrame(cost_data)
+                            st.subheader("Estimated Transaction Costs")
+                            st.dataframe(cost_df, use_container_width=True)
+                        else:
+                            st.error(f"Error in Etherscan API response: {data.get('message', 'Unknown error')}")
+                    else:
+                        st.error(f"HTTP error: {response.status_code}")
+                except Exception as e:
+                    st.error(f"Error fetching gas prices: {str(e)}")
+
+        # Add a gas cost calculator
+        st.subheader("Gas Cost Calculator")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            gas_units = st.number_input(
+                "Gas Units",
+                min_value=21000,
+                max_value=10000000,
+                value=100000,
+                step=10000,
+                help="Estimated gas units for your transaction"
             )
 
-        # Add links to transactions
-        st.subheader("Transaction Links")
-        for i, tx in enumerate(st.session_state.gas_fees):
-            if 'tx_hash' in tx:
-                # Ensure the transaction hash has the 0x prefix
-                tx_hash = tx['tx_hash']
-                if not tx_hash.startswith('0x'):
-                    tx_hash = f"0x{tx_hash}"
-                st.markdown(f"[{tx.get('operation', 'Transaction')} - {tx.get('timestamp', '')}](https://sepolia.basescan.org/tx/{tx_hash})")
-    else:
-        st.info("No gas fees tracked yet. They will appear here after you create records or perform other blockchain transactions.")
+        with col2:
+            gas_price_input = st.number_input(
+                "Gas Price (Gwei)",
+                min_value=0.1,
+                max_value=1000.0,
+                value=1.0,
+                step=0.1,
+                help="Gas price in Gwei"
+            )
 
-    # Add a button to fetch real-time gas prices
-    if st.button("Fetch Current Gas Prices", key="fetch_gas_prices"):
-        try:
-            # Initialize web3 connection to BASE Sepolia
-            from web3 import Web3
-            import requests
+        # Calculate the cost
+        gas_price_wei = w3.to_wei(gas_price_input, 'gwei')
+        cost_wei = gas_units * gas_price_wei
+        cost_eth = w3.from_wei(cost_wei, 'ether')
 
-            # Connect to BASE Sepolia
-            w3 = Web3(Web3.HTTPProvider("https://sepolia.base.org"))
+        # Display the result
+        st.metric(
+            label="Estimated Transaction Cost",
+            value=f"{float(cost_eth):.6f} ETH"
+        )
 
-            if w3.is_connected():
-                # Get current gas price
-                gas_price = w3.eth.gas_price
-                gas_price_gwei = w3.from_wei(gas_price, 'gwei')
+        # Add a note about gas prices
+        with st.expander("About Gas Prices"):
+            st.markdown("""
+            **Gas Price Components:**
+            - **Base Fee**: Set by the network based on demand. This portion is burned.
+            - **Priority Fee**: Optional tip to validators to prioritize your transaction.
+            - **Total Gas Price** = Base Fee + Priority Fee
 
-                # Get ETH price in USD
-                try:
-                    # Use CoinGecko API to get ETH price
-                    response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd")
-                    eth_price = response.json()["ethereum"]["usd"]
-                except:
-                    eth_price = 3000  # Fallback price if API fails
+            **Transaction Types:**
+            - **Simple Transfer**: Sending ETH from one address to another (~21,000 gas units)
+            - **ERC-20 Transfer**: Transferring tokens (~65,000 gas units)
+            - **Contract Interaction**: Calling functions on smart contracts (~100,000 gas units)
+            - **NFT Minting**: Creating a new NFT (~150,000 gas units)
+            - **Contract Deployment**: Deploying a new smart contract (~1,000,000 gas units)
 
-                # Display gas prices
-                st.success(f"Current BASE Sepolia Gas Price: {gas_price_gwei:.2f} Gwei")
-
-                # Calculate costs for different operations
-                operations = {
-                    "Store Record": 100000,  # Estimated gas used
-                    "Share Record": 50000,
-                    "Purchase Request": 80000,
-                    "Finalize Purchase": 120000,
-                    "Reply to Request": 60000
-                }
-
-                # Create a table of costs
-                cost_data = []
-                for op, gas in operations.items():
-                    cost_wei = gas * gas_price
-                    cost_eth = w3.from_wei(cost_wei, 'ether')
-                    cost_usd = cost_eth * eth_price
-                    cost_data.append({
-                        "Operation": op,
-                        "Gas Used (est.)": gas,
-                        "Cost (ETH)": f"{cost_eth:.6f}",
-                        "Cost (USD)": f"${cost_usd:.2f}"
-                    })
-
-                # Display as DataFrame
-                cost_df = pd.DataFrame(cost_data)
-                st.subheader("Estimated Transaction Costs")
-                st.dataframe(cost_df, use_container_width=True)
-            else:
-                st.error("Could not connect to BASE Sepolia network")
-        except Exception as e:
-            st.error(f"Error fetching gas prices: {str(e)}")
+            Gas prices on testnets like Sepolia are typically lower than on mainnet.
+            """)
 
     # Add a button to clear gas fees history
     if st.session_state.gas_fees and st.button("Clear Gas Fees History", key="clear_gas_fees"):
@@ -451,10 +715,10 @@ def render_gas_fees_tab(wallet_address):
         st.rerun()
 
     # Add real-time gas price information from BASE Sepolia
-    st.subheader("Real-Time BASE Sepolia Gas Prices")
+    st.subheader("Real-Time Ethereum Sepolia Gas Prices")
 
     try:
-        gas_prices = fetch_base_gas_prices()
+        gas_prices = fetch_sepolia_gas_prices()
     except Exception as e:
         st.error(f"Error fetching gas prices: {str(e)}")
         # Provide fallback gas prices
@@ -1893,6 +2157,23 @@ with st.sidebar:
         # Each account has a fixed role
         st.session_state.selected_role = account_info["role"]
         role = st.session_state.selected_role
+
+        # Set the wallet address based on the selected role
+        WALLET_ADDRESS = account_info["address"]
+
+        # Update the wallet balance when changing roles
+        try:
+            # First try to get balance from Sepolia Etherscan API
+            etherscan_balance = fetch_wallet_balance_from_etherscan(WALLET_ADDRESS)
+            if etherscan_balance is not None:
+                st.info(f"Wallet balance (via Etherscan): {etherscan_balance:.6f} ETH")
+            else:
+                # Fallback to Ethereum Sepolia RPC
+                sepolia_balance = fetch_wallet_balance_from_sepolia(WALLET_ADDRESS)
+                if sepolia_balance is not None:
+                    st.info(f"Wallet balance (Ethereum Sepolia): {sepolia_balance:.6f} ETH")
+        except Exception as e:
+            st.warning(f"Could not fetch wallet balance: {e}")
 
         # Debug info
         st.write(f"Debug - Selected Role: {role}")
