@@ -61,6 +61,7 @@ if [ ! -f .env ]; then
 # Ethereum Sepolia testnet connection
 SEPOLIA_RPC_URL=https://ethereum-sepolia.publicnode.com
 CONTRACT_ADDRESS=0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA
+# Deployed on BASE Sepolia
 
 # Account private keys (DO NOT USE THESE IN PRODUCTION)
 PRIVATE_KEY=91e5c2bed81b69f9176b6404710914e9bf36a6359122a2d1570116fc6322562e

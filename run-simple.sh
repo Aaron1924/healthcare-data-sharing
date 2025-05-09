@@ -56,6 +56,7 @@ if [ ! -f .env ]; then
 # Ethereum Sepolia testnet connection
 SEPOLIA_RPC_URL=https://ethereum-sepolia.publicnode.com
 CONTRACT_ADDRESS=0x8Cbf9a04C9c7F329DCcaeabE90a424e8F9687aaA
+# Deployed on BASE Sepolia
 
 # Account private keys (DO NOT USE THESE IN PRODUCTION)
 PRIVATE_KEY=91e5c2bed81b69f9176b6404710914e9bf36a6359122a2d1570116fc6322562e
@@ -80,7 +81,7 @@ docker-compose -f docker-compose-simple.yml up --build -d
 
 if [ $? -eq 0 ]; then
   print_message "Containers started successfully!"
-  
+
   # Get the local IP address for external access
   if command -v ip &> /dev/null; then
     # Linux
@@ -91,12 +92,12 @@ if [ $? -eq 0 ]; then
   else
     LOCAL_IP="your-server-ip"
   fi
-  
+
   print_message "Local access:"
   print_message "  Web UI: http://localhost:8501"
   print_message "  API: http://localhost:8000"
   print_message "  File Server: http://localhost:8080"
-  
+
   print_message ""
   print_message "External access (share these URLs with others):"
   print_message "  Web UI: http://$LOCAL_IP:8501"
